@@ -1,4 +1,4 @@
-// #define NDEBUG
+#define NDEBUG
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -326,11 +326,13 @@ private:
         createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
         createInfo.ppEnabledExtensionNames = extensions.data();
 
+        #ifndef NDEBUG
         std::cout << "VULKAN: Available extensions:\n";
 
         for (const auto& extension : extensions) {
             std::cout << '\t' << extension << '\n';
         }
+        #endif
 
         if (vkCreateInstance(&createInfo, nullptr, &instance) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create instance!");
