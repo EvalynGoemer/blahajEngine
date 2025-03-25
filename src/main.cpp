@@ -1,4 +1,6 @@
-#define NDEBUG
+// #define NDEBUG
+
+#include "engine/engine_structs.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -27,8 +29,11 @@
 #include <chrono>
 #include <thread>
 #include <functional>
+#include <memory>
 
-class blahajEngine {
+
+namespace blahajEngine {
+class engine {
 public:
     std::string programName;
     float target_fps = 120.0f;
@@ -38,15 +43,27 @@ public:
     int bgTileMap[24*24];
     int bgTileMapArrayLength;
 
-    using gameLoopCallback = std::function<void(blahajEngine&)>;
+    using gameLoopCallback = std::function<void(blahajEngine::engine&)>;
 
     void setGameLoopCallback(gameLoopCallback cb) {
-        callback = cb;
+        glcallback = cb;
     }
 
     void triggerGameLoopCallback() {
-        if (callback) {
-            callback(*this);
+        if (glcallback) {
+            glcallback(*this);
+        }
+    }
+
+    using gameInitCallback = std::function<void(blahajEngine::engine&)>;
+
+    void setGameInitCallback(gameInitCallback cb) {
+        gicallback = cb;
+    }
+
+    void triggerGameInitCallback() {
+        if (gicallback) {
+            gicallback(*this);
         }
     }
 
@@ -60,10 +77,12 @@ public:
 
     GLFWwindow* window;
 
+    std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjects;
 private:
     const std::string engineName = "Blahaj Engine";
 
-    gameLoopCallback callback;
+    gameLoopCallback glcallback;
+    gameInitCallback gicallback;
 
     const int MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t currentFrame = 0;
@@ -105,11 +124,6 @@ private:
     std::vector<VkDeviceMemory> uniformBuffersMemory;
     std::vector<void*> uniformBuffersMapped;
 
-    VkBuffer vertexBuffer;
-    VkDeviceMemory vertexBufferMemory;
-    VkBuffer indexBuffer;
-    VkDeviceMemory indexBufferMemory;
-
     VkImage depthImage;
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
@@ -138,53 +152,6 @@ private:
     #else
     const bool enableValidationLayers = true;
     #endif
-
-    struct Vertex {
-        glm::vec3 pos;
-        glm::vec3 color;
-        glm::vec2 texCoord;
-
-        static VkVertexInputBindingDescription getBindingDescription() {
-            VkVertexInputBindingDescription bindingDescription{};
-            bindingDescription.binding = 0;
-            bindingDescription.stride = sizeof(Vertex);
-            bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-            return bindingDescription;
-        }
-
-        static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() {
-            std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
-
-            attributeDescriptions[0].binding = 0;
-            attributeDescriptions[0].location = 0;
-            attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-            attributeDescriptions[0].offset = offsetof(Vertex, pos);
-
-            attributeDescriptions[1].binding = 0;
-            attributeDescriptions[1].location = 1;
-            attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-            attributeDescriptions[1].offset = offsetof(Vertex, color);
-
-            attributeDescriptions[2].binding = 0;
-            attributeDescriptions[2].location = 2;
-            attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-            attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
-
-            return attributeDescriptions;
-        }
-    };
-
-    const std::vector<Vertex> vertices = {
-        {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-        {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-        {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-        {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-    };
-
-    const std::vector<uint16_t> indices = {
-        0, 1, 2, 2, 3, 0
-    };
 
     struct alignas(16) AlignedInt {
         int i;
@@ -231,7 +198,7 @@ private:
     }
 
     static void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
-        auto app = reinterpret_cast<blahajEngine*>(glfwGetWindowUserPointer(window));
+        auto app = reinterpret_cast<blahajEngine::engine*>(glfwGetWindowUserPointer(window));
         app->framebufferResized = true;
     }
 
@@ -1269,8 +1236,8 @@ private:
         endSingleTimeCommands(commandBuffer);
     }
 
-    void createVertexBuffer() {
-        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+    void createVertexBuffer(std::shared_ptr<blahajEngine::gameObject> object) {
+        VkDeviceSize bufferSize = sizeof(object->vertices[0]) * object->vertices.size();
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -1278,19 +1245,19 @@ private:
 
         void* data;
         vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(data, vertices.data(), (size_t) bufferSize);
+        memcpy(data, object->vertices.data(), (size_t) bufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, object->vertexBuffer, object->vertexBufferMemory);
 
-        copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+        copyBuffer(stagingBuffer, object->vertexBuffer, bufferSize);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
-    void createIndexBuffer() {
-        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+    void createIndexBuffer(std::shared_ptr<blahajEngine::gameObject> object) {
+        VkDeviceSize bufferSize = sizeof(object->indices[0]) * object->indices.size();
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -1298,12 +1265,12 @@ private:
 
         void* data;
         vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(data, indices.data(), (size_t) bufferSize);
+        memcpy(data, object->indices.data(), (size_t) bufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, object->indexBuffer, object->indexBufferMemory);
 
-        copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+        copyBuffer(stagingBuffer, object->indexBuffer, bufferSize);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
@@ -1495,16 +1462,20 @@ private:
         scissor.extent = swapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-        VkBuffer vertexBuffers[] = {vertexBuffer};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
+            auto& gameObjectPtr = *it;
 
-        vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+            VkBuffer vertexBuffers[] = {gameObjectPtr->vertexBuffer};
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-        vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+            vkCmdBindIndexBuffer(commandBuffer, gameObjectPtr->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
+            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(gameObjectPtr->indices.size()), 1, 0, 0, 0);
+        }
         vkCmdEndRenderPass(commandBuffer);
 
         if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
@@ -1552,8 +1523,6 @@ private:
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
-        createVertexBuffer();
-        createIndexBuffer();
         createUniformBuffers();
         createDescriptorPool();
         createDescriptorSets();
@@ -1562,6 +1531,7 @@ private:
     }
 
     void initEngine() {
+        triggerGameInitCallback();
     }
 
     void drawFrame() {
@@ -1708,11 +1678,17 @@ private:
 
         vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
 
-        vkDestroyBuffer(device, indexBuffer, nullptr);
-        vkFreeMemory(device, indexBufferMemory, nullptr);
+        for (auto it = gameObjects.begin(); it != gameObjects.end(); ) {
+            auto& gameObjectPtr = *it;
 
-        vkDestroyBuffer(device, vertexBuffer, nullptr);
-        vkFreeMemory(device, vertexBufferMemory, nullptr);
+            vkDestroyBuffer(device, gameObjectPtr->indexBuffer, nullptr);
+            vkFreeMemory(device, gameObjectPtr->indexBufferMemory, nullptr);
+
+            vkDestroyBuffer(device, gameObjectPtr->vertexBuffer, nullptr);
+            vkFreeMemory(device, gameObjectPtr->vertexBufferMemory, nullptr);
+
+            it = gameObjects.erase(it);
+        }
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
@@ -1735,7 +1711,17 @@ private:
 
         glfwTerminate();
     }
+public:
+    void addGameObject(glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
+        auto object = std::make_shared<blahajEngine::gameObject> (pos, rot, vertices, indices);
+
+        createVertexBuffer(object);
+        createIndexBuffer(object);
+
+        gameObjects.push_back(object);
+    }
 };
+}
 
 void reverseArray(int arr[], int size) {
     int left = 0, right = size - 1;
@@ -1751,10 +1737,38 @@ struct SnakeSegment {
 };
 
 int main() {
-    blahajEngine app;
+    blahajEngine::engine app;
 
     app.programName = "Blahaj Engine Demo: Snake";
     app.target_fps = 5.0f;
+
+    app.setGameInitCallback([](blahajEngine::engine& instance) {
+        std::vector<blahajEngine::Vertex> objectVertices = {
+            {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+            {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+            {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+            {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
+        };
+
+        std::vector<uint16_t> objectIndices = {
+            0, 1, 2, 2, 3, 0
+        };
+
+        std::vector<blahajEngine::Vertex> objectVertices2 = {
+            {{-0.3f, -0.3f, 1.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+            {{0.3f, -0.3f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+            {{0.3f, 0.3f, 1.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+            {{-0.3f, 0.3f, 1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
+        };
+
+        std::vector<uint16_t> objectIndices2 = {
+            0, 1, 2, 2, 3, 0
+        };
+
+        instance.addGameObject({0,0,0}, {0,0,0} , objectVertices , objectIndices );
+        instance.addGameObject({0,0,0}, {0,0,0} , objectVertices2 , objectIndices2 );
+
+    });
 
     enum tileIds {
         BLANK = 0,
@@ -1773,7 +1787,7 @@ int main() {
     int directionX = 1, directionY = 0;
     int foodX = rand() % 24, foodY = rand() % 24;
 
-    app.setGameLoopCallback([&snake, &directionX, &directionY, &foodX, &foodY](blahajEngine& instance) {
+    app.setGameLoopCallback([&snake, &directionX, &directionY, &foodX, &foodY](blahajEngine::engine& instance) {
         // Handle input
         if (glfwGetKey(instance.window, GLFW_KEY_W) == GLFW_PRESS && directionY == 0) {
             directionX = 0; directionY = 1;
