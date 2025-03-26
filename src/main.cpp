@@ -1829,7 +1829,7 @@ int main() {
 
         // Compact 2D tileMap into 1D for use by blahajEngine
         int index = 0;
-        for (int x = x; x < instance.bgTileMapWidth; x++) {
+        for (int x = 0; x < instance.bgTileMapWidth; x++) {
             for (int y = 0; y < instance.bgTileMapHeight; y++) {
                 if (index < instance.bgTileMapArrayLength) {
                     instance.bgTileMap[index++] = tileMap[x][y];
