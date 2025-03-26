@@ -49,7 +49,14 @@ namespace blahajEngine {
         }
     };
 
+    enum objectTypes {
+        OBJ_TYPE_DEBUG = -1,
+        OBJ_TYPE_BACKGROUND = 1
+    };
+
     struct gameObject {
+        int objectType;
+
         glm::vec3 pos;
         glm::vec3 rot;
 
@@ -61,7 +68,19 @@ namespace blahajEngine {
         VkBuffer indexBuffer;
         VkDeviceMemory indexBufferMemory;
 
-        gameObject(glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
+        VkDescriptorSetLayout descriptorSetLayout;
+        VkDescriptorPool descriptorPool;
+        std::vector<VkDescriptorSet> descriptorSets;
+
+        std::vector<VkBuffer> uniformBuffers;
+        std::vector<VkDeviceMemory> uniformBuffersMemory;
+        std::vector<void*> uniformBuffersMapped;
+
+        VkPipeline graphicsPipeline;
+        VkPipelineLayout pipelineLayout;
+
+        gameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
+            this->objectType = objectType;
             this->pos = pos;
             this->rot = rot;
             this->vertices = vertices;

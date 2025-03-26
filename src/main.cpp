@@ -1,4 +1,4 @@
-// #define NDEBUG
+#define NDEBUG
 
 #include "engine/engine_structs.h"
 
@@ -40,7 +40,7 @@ public:
 
     int bgTileMapWidth;
     int bgTileMapHeight;
-    int bgTileMap[24*24];
+    int bgTileMap[24*24] = {};
     int bgTileMapArrayLength;
 
     using gameLoopCallback = std::function<void(blahajEngine::engine&)>;
@@ -98,16 +98,10 @@ private:
     VkFormat swapChainImageFormat;
     VkExtent2D swapChainExtent;
 
-    VkPipeline graphicsPipeline;
     VkQueue graphicsQueue;
     VkQueue presentQueue;
 
     VkRenderPass renderPass;
-    VkPipelineLayout pipelineLayout;
-
-    VkDescriptorSetLayout descriptorSetLayout;
-    VkDescriptorPool descriptorPool;
-    std::vector<VkDescriptorSet> descriptorSets;
 
     VkCommandPool commandPool;
     std::vector<VkCommandBuffer> commandBuffers;
@@ -119,10 +113,6 @@ private:
     std::vector<VkImage> swapChainImages;
     std::vector<VkImageView> swapChainImageViews;
     std::vector<VkFramebuffer> swapChainFramebuffers;
-
-    std::vector<VkBuffer> uniformBuffers;
-    std::vector<VkDeviceMemory> uniformBuffersMemory;
-    std::vector<void*> uniformBuffersMapped;
 
     VkImage depthImage;
     VkDeviceMemory depthImageMemory;
@@ -692,7 +682,7 @@ private:
         }
     }
 
-    void createDescriptorSetLayout() {
+    void createDescriptorSetLayout(std::shared_ptr<blahajEngine::gameObject> object) {
         VkDescriptorSetLayoutBinding uboLayoutBinding{};
         uboLayoutBinding.binding = 0;
         uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -713,7 +703,7 @@ private:
         layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
         layoutInfo.pBindings = bindings.data();
 
-        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &object->descriptorSetLayout) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create descriptor set layout!");
         }
     }
@@ -754,9 +744,9 @@ private:
         VK_DYNAMIC_STATE_SCISSOR
     };
 
-    void createGraphicsPipeline() {
-        auto vertShaderCode = readFile("spv/shader.vert.spv");
-        auto fragShaderCode = readFile("spv/shader.frag.spv");
+    void createGraphicsPipeline(std::shared_ptr<blahajEngine::gameObject> object, std::string vertShaderPath, std::string fragShaderPath) {
+        auto vertShaderCode = readFile(vertShaderPath);
+        auto fragShaderCode = readFile(fragShaderPath);
 
         VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
         VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
@@ -846,9 +836,9 @@ private:
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
-        pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
+        pipelineLayoutInfo.pSetLayouts = &object->descriptorSetLayout;
 
-        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS) {
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &object->pipelineLayout) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create pipeline layout!");
         }
 
@@ -864,12 +854,12 @@ private:
         pipelineInfo.pDepthStencilState = &depthStencil;
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
-        pipelineInfo.layout = pipelineLayout;
+        pipelineInfo.layout = object->pipelineLayout;
         pipelineInfo.renderPass = renderPass;
         pipelineInfo.subpass = 0;
         pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
-        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS) {
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &object->graphicsPipeline) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create graphics pipeline!");
         }
 
@@ -1276,21 +1266,21 @@ private:
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
-    void createUniformBuffers() {
+    void createUniformBuffers(std::shared_ptr<blahajEngine::gameObject> object) {
         VkDeviceSize bufferSize = sizeof(UniformBufferObject);
 
-        uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-        uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
-        uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+        object->uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+        object->uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+        object->uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, object->uniformBuffers[i], object->uniformBuffersMemory[i]);
 
-            vkMapMemory(device, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+            vkMapMemory(device, object->uniformBuffersMemory[i], 0, bufferSize, 0, &object->uniformBuffersMapped[i]);
         }
     }
 
-    void updateUniformBuffer(uint32_t currentImage) {
+    void updateUniformBuffer(std::shared_ptr<blahajEngine::gameObject> object, uint32_t currentImage) {
         static auto startTime = std::chrono::high_resolution_clock::now();
 
         auto currentTime = std::chrono::high_resolution_clock::now();
@@ -1299,6 +1289,20 @@ private:
         UniformBufferObject ubo{};
 
         ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+
+        if (object->objectType == OBJ_TYPE_DEBUG) {
+            float time = glfwGetTime();
+            float xOffset = sin(time) * 0.3f;
+            float rotationAngle = time;
+
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, glm::vec3(xOffset, -0.3f, 0.0f));
+            model = glm::rotate(model, rotationAngle, glm::vec3(0.0f, 0.0f, 1.0f));
+            model = glm::scale(model, glm::vec3(0.5f));
+
+            ubo.model = model;
+        }
+
         ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 1.3f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
 
         float zoom = 600.0f;
@@ -1328,10 +1332,10 @@ private:
             ubo.tileMap[i].i = bgTileMap[i];
         }
 
-        memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+        memcpy(object->uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
 
-    void createDescriptorPool() {
+    void createDescriptorPool(std::shared_ptr<blahajEngine::gameObject> object) {
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
         poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
@@ -1344,28 +1348,28 @@ private:
         poolInfo.pPoolSizes = poolSizes.data();
         poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
-        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &object->descriptorPool) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create descriptor pool!");
         }
     }
 
-    void createDescriptorSets() {
-        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+    void createDescriptorSets(std::shared_ptr<blahajEngine::gameObject> object) {
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, object->descriptorSetLayout);
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorPool = object->descriptorPool;
         allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
         allocInfo.pSetLayouts = layouts.data();
 
 
-        descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-        if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+        object->descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+        if (vkAllocateDescriptorSets(device, &allocInfo, object->descriptorSets.data()) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to allocate descriptor sets!");
         }
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             VkDescriptorBufferInfo bufferInfo{};
-            bufferInfo.buffer = uniformBuffers[i];
+            bufferInfo.buffer = object->uniformBuffers[i];
             bufferInfo.offset = 0;
             bufferInfo.range = sizeof(UniformBufferObject);
 
@@ -1376,7 +1380,7 @@ private:
 
             VkWriteDescriptorSet descriptorWrite{};
             descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrite.dstSet = descriptorSets[i];
+            descriptorWrite.dstSet = object->descriptorSets[i];
             descriptorWrite.dstBinding = 0;
             descriptorWrite.dstArrayElement = 0;
             descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1388,7 +1392,7 @@ private:
             std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[0].dstSet = descriptorSets[i];
+            descriptorWrites[0].dstSet = object->descriptorSets[i];
             descriptorWrites[0].dstBinding = 0;
             descriptorWrites[0].dstArrayElement = 0;
             descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -1396,7 +1400,7 @@ private:
             descriptorWrites[0].pBufferInfo = &bufferInfo;
 
             descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstSet = descriptorSets[i];
+            descriptorWrites[1].dstSet = object->descriptorSets[i];
             descriptorWrites[1].dstBinding = 1;
             descriptorWrites[1].dstArrayElement = 0;
             descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1446,8 +1450,6 @@ private:
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
@@ -1466,13 +1468,15 @@ private:
         for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
             auto& gameObjectPtr = *it;
 
+            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gameObjectPtr->graphicsPipeline);
+
             VkBuffer vertexBuffers[] = {gameObjectPtr->vertexBuffer};
             VkDeviceSize offsets[] = {0};
             vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
             vkCmdBindIndexBuffer(commandBuffer, gameObjectPtr->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gameObjectPtr->pipelineLayout, 0, 1, &gameObjectPtr->descriptorSets[currentFrame], 0, nullptr);
 
             vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(gameObjectPtr->indices.size()), 1, 0, 0, 0);
         }
@@ -1515,17 +1519,12 @@ private:
         createSwapChain();
         createImageViews();
         createRenderPass();
-        createDescriptorSetLayout();
-        createGraphicsPipeline();
         createCommandPool();
         createDepthResources();
         createFramebuffers();
         createTextureImage();
         createTextureImageView();
         createTextureSampler();
-        createUniformBuffers();
-        createDescriptorPool();
-        createDescriptorSets();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -1547,7 +1546,10 @@ private:
             throw std::runtime_error("VULKAN: Failed to acquire swap chain image!");
         }
 
-        updateUniformBuffer(currentFrame);
+        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
+            auto& gameObjectPtr = *it;
+            updateUniformBuffer(gameObjectPtr, currentFrame);
+        }
 
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
@@ -1659,16 +1661,28 @@ private:
     void cleanup() {
         cleanupSwapChain();
 
-        vkDestroyPipeline(device, graphicsPipeline, nullptr);
-        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
-        vkDestroyRenderPass(device, renderPass, nullptr);
+        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
+            auto& gameObjectPtr = *it;
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            vkDestroyBuffer(device, uniformBuffers[i], nullptr);
-            vkFreeMemory(device, uniformBuffersMemory[i], nullptr);
+            vkDestroyPipeline(device, gameObjectPtr->graphicsPipeline, nullptr);
+            vkDestroyPipelineLayout(device, gameObjectPtr->pipelineLayout, nullptr);
         }
 
-        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+        vkDestroyRenderPass(device, renderPass, nullptr);
+
+        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
+            auto& gameObjectPtr = *it;
+
+            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+                vkDestroyBuffer(device, gameObjectPtr->uniformBuffers[i], nullptr);
+                vkFreeMemory(device, gameObjectPtr->uniformBuffersMemory[i], nullptr);
+            }
+
+            vkDestroyDescriptorPool(device, gameObjectPtr->descriptorPool, nullptr);
+        }
+
+
+
 
         vkDestroySampler(device, textureSampler, nullptr);
         vkDestroyImageView(device, textureImageView, nullptr);
@@ -1676,7 +1690,11 @@ private:
         vkDestroyImage(device, textureImage, nullptr);
         vkFreeMemory(device, textureImageMemory, nullptr);
 
-        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
+            auto& gameObjectPtr = *it;
+
+            vkDestroyDescriptorSetLayout(device, gameObjectPtr->descriptorSetLayout, nullptr);
+        }
 
         for (auto it = gameObjects.begin(); it != gameObjects.end(); ) {
             auto& gameObjectPtr = *it;
@@ -1712,8 +1730,18 @@ private:
         glfwTerminate();
     }
 public:
-    void addGameObject(glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
-        auto object = std::make_shared<blahajEngine::gameObject> (pos, rot, vertices, indices);
+    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath) {
+        auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos,  rot, vertices, indices);
+
+        createDescriptorSetLayout(object);
+
+        createGraphicsPipeline(object, vertShaderPath, fragShaderPath);
+
+
+        createUniformBuffers(object);
+
+        createDescriptorPool(object);
+        createDescriptorSets(object);
 
         createVertexBuffer(object);
         createIndexBuffer(object);
@@ -1740,7 +1768,7 @@ int main() {
     blahajEngine::engine app;
 
     app.programName = "Blahaj Engine Demo: Snake";
-    app.target_fps = 5.0f;
+    app.target_fps = 90.0f;
 
     app.setGameInitCallback([](blahajEngine::engine& instance) {
         std::vector<blahajEngine::Vertex> objectVertices = {
@@ -1765,8 +1793,8 @@ int main() {
             0, 1, 2, 2, 3, 0
         };
 
-        instance.addGameObject({0,0,0}, {0,0,0} , objectVertices , objectIndices );
-        instance.addGameObject({0,0,0}, {0,0,0} , objectVertices2 , objectIndices2 );
+        instance.addGameObject(0, {0,0,0}, {0,0,0} , objectVertices , objectIndices, "spv/tilemap.vert.spv", "spv/tilemap.frag.spv");
+        instance.addGameObject(-1, {0,0,0}, {0,0,0} , objectVertices2 , objectIndices2, "spv/debug.vert.spv", "spv/debug.frag.spv");
 
     });
 
@@ -1781,13 +1809,17 @@ int main() {
 
     app.bgTileMapArrayLength = app.bgTileMapWidth * app.bgTileMapHeight;
 
+    int frameCounter;
+
     std::srand(std::time(nullptr));
 
     std::vector<SnakeSegment> snake = {{12, 12}};
     int directionX = 1, directionY = 0;
     int foodX = rand() % 24, foodY = rand() % 24;
 
-    app.setGameLoopCallback([&snake, &directionX, &directionY, &foodX, &foodY](blahajEngine::engine& instance) {
+    app.setGameLoopCallback([&frameCounter, &snake, &directionX, &directionY, &foodX, &foodY](blahajEngine::engine& instance) {
+        frameCounter++;
+
         // Handle input
         if (glfwGetKey(instance.window, GLFW_KEY_W) == GLFW_PRESS && directionY == 0) {
             directionX = 0; directionY = 1;
@@ -1802,37 +1834,39 @@ int main() {
             directionX = 1; directionY = 0;
         }
 
-        // Move the snake
-        SnakeSegment newHead = {snake[0].x + directionX, snake[0].y + directionY};
+        if (frameCounter % 12 == 0) {
+            // Move the snake
+            SnakeSegment newHead = {snake[0].x + directionX, snake[0].y + directionY};
 
-        // Check for collisions
-        if (newHead.x < 0 || newHead.x >= 24 || newHead.y < 0 || newHead.y >= 24) return; // Hit wall
-        for (auto& segment : snake) if (segment.x == newHead.x && segment.y == newHead.y) return; // Hit itself
+            // Check for collisions
+            if (newHead.x < 0 || newHead.x >= 24 || newHead.y < 0 || newHead.y >= 24) return; // Hit wall
+            for (auto& segment : snake) if (segment.x == newHead.x && segment.y == newHead.y) return; // Hit itself
 
-        snake.insert(snake.begin(), newHead);
+            snake.insert(snake.begin(), newHead);
 
-        // Check if the snake eats food
-        if (newHead.x == foodX && newHead.y == foodY) {
-            foodX = rand() % 24;
-            foodY = rand() % 24;
-        } else {
-            snake.pop_back();
-        }
+            // Check if the snake eats food
+            if (newHead.x == foodX && newHead.y == foodY) {
+                foodX = rand() % 24;
+                foodY = rand() % 24;
+            } else {
+                snake.pop_back();
+            }
 
-        // Render game onto tileMap
-        int tileMap[24][24] = {0};
+            // Render game onto tileMap
+            int tileMap[24][24] = {0};
 
-        for (auto& segment : snake) {
-            tileMap[segment.x][segment.y] = 1;
-        }
-        tileMap[foodX][foodY] = 2; // Food
+            for (auto& segment : snake) {
+                tileMap[segment.x][segment.y] = 1;
+            }
+            tileMap[foodX][foodY] = 2; // Food
 
-        // Compact 2D tileMap into 1D for use by blahajEngine
-        int index = 0;
-        for (int x = 0; x < instance.bgTileMapWidth; x++) {
-            for (int y = 0; y < instance.bgTileMapHeight; y++) {
-                if (index < instance.bgTileMapArrayLength) {
-                    instance.bgTileMap[index++] = tileMap[x][y];
+            // Compact 2D tileMap into 1D for use by blahajEngine
+            int index = 0;
+            for (int x = 0; x < instance.bgTileMapWidth; x++) {
+                for (int y = 0; y < instance.bgTileMapHeight; y++) {
+                    if (index < instance.bgTileMapArrayLength) {
+                        instance.bgTileMap[index++] = tileMap[x][y];
+                    }
                 }
             }
         }
