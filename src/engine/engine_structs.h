@@ -11,6 +11,7 @@
 
 #include <array>
 #include <vector>
+#include <functional>
 
 namespace blahajEngine {
     struct Vertex {
@@ -49,6 +50,23 @@ namespace blahajEngine {
         }
     };
 
+    struct alignas(16) AlignedInt {
+        int i;
+    };
+
+    struct UniformBufferObject {
+        AlignedInt tileMap[24*24];
+        alignas(16) glm::mat4 model;
+        alignas(16) glm::mat4 view;
+        alignas(16) glm::mat4 proj;
+        int textureAtlasWidth;
+        int textureAtlasHeight;
+        int tileWidth;
+        int tileHeight;
+        int tileMapWidth;
+        int tileMapHeight;
+    };
+
     enum objectTypes {
         OBJ_TYPE_DEBUG = -1,
         OBJ_TYPE_BACKGROUND = 1
@@ -78,6 +96,18 @@ namespace blahajEngine {
 
         VkPipeline graphicsPipeline;
         VkPipelineLayout pipelineLayout;
+
+        std::function<void(UniformBufferObject& ubo)> updateFunction;
+
+        void setUpdateFunction(std::function<void(UniformBufferObject& ubo)> func) {
+            updateFunction = func;
+        }
+
+        void runUpdateFunction(UniformBufferObject& ubo) {
+            if (updateFunction) {
+                updateFunction(ubo);
+            }
+        }
 
         gameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
             this->objectType = objectType;

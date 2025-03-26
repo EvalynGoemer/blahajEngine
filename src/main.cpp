@@ -43,9 +43,7 @@ public:
     int bgTileMap[24*24] = {};
     int bgTileMapArrayLength;
 
-    using gameLoopCallback = std::function<void(blahajEngine::engine&)>;
-
-    void setGameLoopCallback(gameLoopCallback cb) {
+    void setGameLoopCallback(std::function<void(blahajEngine::engine&)> cb) {
         glcallback = cb;
     }
 
@@ -55,9 +53,7 @@ public:
         }
     }
 
-    using gameInitCallback = std::function<void(blahajEngine::engine&)>;
-
-    void setGameInitCallback(gameInitCallback cb) {
+    void setGameInitCallback(std::function<void(blahajEngine::engine&)> cb) {
         gicallback = cb;
     }
 
@@ -77,12 +73,14 @@ public:
 
     GLFWwindow* window;
 
+    VkExtent2D swapChainExtent;
+
     std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjects;
 private:
     const std::string engineName = "Blahaj Engine";
 
-    gameLoopCallback glcallback;
-    gameInitCallback gicallback;
+    std::function<void(blahajEngine::engine&)> glcallback;
+    std::function<void(blahajEngine::engine&)> gicallback;
 
     const int MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t currentFrame = 0;
@@ -96,7 +94,6 @@ private:
     VkSurfaceKHR surface;
     VkSwapchainKHR swapChain;
     VkFormat swapChainImageFormat;
-    VkExtent2D swapChainExtent;
 
     VkQueue graphicsQueue;
     VkQueue presentQueue;
@@ -142,23 +139,6 @@ private:
     #else
     const bool enableValidationLayers = true;
     #endif
-
-    struct alignas(16) AlignedInt {
-        int i;
-    };
-
-    struct UniformBufferObject {
-        AlignedInt tileMap[24*24];
-        alignas(16) glm::mat4 model;
-        alignas(16) glm::mat4 view;
-        alignas(16) glm::mat4 proj;
-        int textureAtlasWidth;
-        int textureAtlasHeight;
-        int tileWidth;
-        int tileHeight;
-        int tileMapWidth;
-        int tileMapHeight;
-    };
 
     VkSampler createSampler() {
         VkSamplerCreateInfo samplerInfo{};
@@ -1288,49 +1268,7 @@ private:
 
         UniformBufferObject ubo{};
 
-        ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
-
-        if (object->objectType == OBJ_TYPE_DEBUG) {
-            float time = glfwGetTime();
-            float xOffset = sin(time) * 0.3f;
-            float rotationAngle = time;
-
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model, glm::vec3(xOffset, -0.3f, 0.0f));
-            model = glm::rotate(model, rotationAngle, glm::vec3(0.0f, 0.0f, 1.0f));
-            model = glm::scale(model, glm::vec3(0.5f));
-
-            ubo.model = model;
-        }
-
-        ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 1.3f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
-        float zoom = 600.0f;
-
-        float width = swapChainExtent.width / zoom;
-        float height = swapChainExtent.height / zoom;
-        float left = -width / 2.0f;
-        float right = width / 2.0f;
-        float bottom = -height / 2.0f;
-        float top = height / 2.0f;
-        float nearPlane = 0.1f;
-        float farPlane = 10.0f;
-
-        ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
-        ubo.proj[1][1] *= -1;
-
-        ubo.textureAtlasWidth = 2;
-        ubo.textureAtlasHeight = 1;
-
-        ubo.tileWidth = 32;
-        ubo.tileHeight = 32;
-
-        ubo.tileMapWidth = bgTileMapWidth;
-        ubo.tileMapHeight = bgTileMapHeight;
-
-        for (int i = 0; i < bgTileMapArrayLength; ++i) {
-            ubo.tileMap[i].i = bgTileMap[i];
-        }
+        object->runUpdateFunction(ubo);
 
         memcpy(object->uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
     }
@@ -1730,8 +1668,10 @@ private:
         glfwTerminate();
     }
 public:
-    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath) {
+    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::function<void(UniformBufferObject& ubo)> updateFunction) {
         auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos,  rot, vertices, indices);
+
+        object->setUpdateFunction(updateFunction);
 
         createDescriptorSetLayout(object);
 
@@ -1770,7 +1710,7 @@ int main() {
     app.programName = "Blahaj Engine Demo: Snake";
     app.target_fps = 90.0f;
 
-    app.setGameInitCallback([](blahajEngine::engine& instance) {
+    app.setGameInitCallback([&app](blahajEngine::engine& instance) {
         std::vector<blahajEngine::Vertex> objectVertices = {
             {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
             {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
@@ -1793,8 +1733,66 @@ int main() {
             0, 1, 2, 2, 3, 0
         };
 
-        instance.addGameObject(0, {0,0,0}, {0,0,0} , objectVertices , objectIndices, "spv/tilemap.vert.spv", "spv/tilemap.frag.spv");
-        instance.addGameObject(-1, {0,0,0}, {0,0,0} , objectVertices2 , objectIndices2, "spv/debug.vert.spv", "spv/debug.frag.spv");
+        instance.addGameObject(0, {0,0,0}, {0,0,0} , objectVertices , objectIndices, "spv/tilemap.vert.spv", "spv/tilemap.frag.spv", [&app] (blahajEngine::UniformBufferObject& ubo) {
+            ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
+
+            ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 1.3f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+            float zoom = 600.0f;
+
+            float width = app.swapChainExtent.width / zoom;
+            float height = app.swapChainExtent.height / zoom;
+            float left = -width / 2.0f;
+            float right = width / 2.0f;
+            float bottom = -height / 2.0f;
+            float top = height / 2.0f;
+            float nearPlane = 0.1f;
+            float farPlane = 10.0f;
+
+            ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
+            ubo.proj[1][1] *= -1;
+
+            ubo.textureAtlasWidth = 2;
+            ubo.textureAtlasHeight = 1;
+
+            ubo.tileWidth = 32;
+            ubo.tileHeight = 32;
+
+            ubo.tileMapWidth = app.bgTileMapWidth;
+            ubo.tileMapHeight = app.bgTileMapHeight;
+
+            for (int i = 0; i < app.bgTileMapArrayLength; ++i) {
+                ubo.tileMap[i].i = app.bgTileMap[i];
+            }
+        });
+        instance.addGameObject(-1, {0,0,0}, {0,0,0} , objectVertices2 , objectIndices2, "spv/debug.vert.spv", "spv/debug.frag.spv", [&app] (blahajEngine::UniformBufferObject& ubo) {
+            float time = glfwGetTime();
+            float xOffset = sin(time) * 0.3f;
+            float rotationAngle = time;
+
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, glm::vec3(xOffset, -0.3f, 0.0f));
+            model = glm::rotate(model, rotationAngle, glm::vec3(0.0f, 0.0f, 1.0f));
+            model = glm::scale(model, glm::vec3(0.5f));
+
+            ubo.model = model;
+
+            ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 1.3f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+            float zoom = 600.0f;
+
+            float width = app.swapChainExtent.width / zoom;
+            float height = app.swapChainExtent.height / zoom;
+            float left = -width / 2.0f;
+            float right = width / 2.0f;
+            float bottom = -height / 2.0f;
+            float top = height / 2.0f;
+            float nearPlane = 0.1f;
+            float farPlane = 10.0f;
+
+            ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
+            ubo.proj[1][1] *= -1;
+        });
 
     });
 
