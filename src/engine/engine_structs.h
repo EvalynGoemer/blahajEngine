@@ -84,6 +84,7 @@ namespace blahajEngine {
 
         glm::vec3 pos;
         glm::vec3 rot;
+        glm::vec3 scale;
 
         std::vector<Vertex> vertices;
         std::vector<uint16_t> indices;
@@ -92,6 +93,11 @@ namespace blahajEngine {
         VkDeviceMemory vertexBufferMemory;
         VkBuffer indexBuffer;
         VkDeviceMemory indexBufferMemory;
+
+        VkImage textureImage;
+        VkImageView textureImageView;
+        VkSampler textureSampler;
+        VkDeviceMemory textureImageMemory;
 
         VkDescriptorSetLayout descriptorSetLayout;
         VkDescriptorPool descriptorPool;

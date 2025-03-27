@@ -84,7 +84,7 @@ private:
     std::function<void(blahajEngine::engine&)> glcallback;
     std::function<void(blahajEngine::engine&)> gicallback;
 
-    const int MAX_FRAMES_IN_FLIGHT = 2;
+    const uint MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t currentFrame = 0;
 
     VkInstance instance;
@@ -116,11 +116,6 @@ private:
     VkImage depthImage;
     VkDeviceMemory depthImageMemory;
     VkImageView depthImageView;
-
-    VkImage textureImage;
-    VkImageView textureImageView;
-    VkSampler textureSampler;
-    VkDeviceMemory textureImageMemory;
 
     bool framebufferResized = false;
 
@@ -793,7 +788,13 @@ private:
 
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
         colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-        colorBlendAttachment.blendEnable = VK_FALSE;
+        colorBlendAttachment.blendEnable = VK_TRUE;
+        colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+        colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_SUBTRACT;
 
         VkPipelineColorBlendStateCreateInfo colorBlending{};
         colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -980,9 +981,9 @@ private:
         endSingleTimeCommands(commandBuffer);
     }
 
-    void createTextureImage() {
+    void createTextureImage(std::shared_ptr<blahajEngine::gameObject> object, std::string imagePath) {
         int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load("assets/texture_atlas.png", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        stbi_uc* pixels = stbi_load(imagePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels) {
@@ -1000,21 +1001,21 @@ private:
 
         stbi_image_free(pixels);
 
-        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage, textureImageMemory);
+        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, object->textureImage, object->textureImageMemory);
 
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-        transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        transitionImageLayout(object->textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        copyBufferToImage(stagingBuffer, object->textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        transitionImageLayout(object->textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
-    void createTextureImageView() {
-        textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    void createTextureImageView(std::shared_ptr<blahajEngine::gameObject> object) {
+        object->textureImageView = createImageView(object->textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
     }
 
-    void createTextureSampler() {
+    void createTextureSampler(std::shared_ptr<blahajEngine::gameObject> object) {
         VkSamplerCreateInfo samplerInfo{};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.magFilter = VK_FILTER_NEAREST;
@@ -1037,7 +1038,7 @@ private:
         samplerInfo.minLod = 0.0f;
         samplerInfo.maxLod = 0.0f;
 
-        if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
+        if (vkCreateSampler(device, &samplerInfo, nullptr, &object->textureSampler) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create texture sampler!");
         }
     }
@@ -1263,11 +1264,6 @@ private:
     }
 
     void updateUniformBuffer(std::shared_ptr<blahajEngine::gameObject> object, uint32_t currentImage) {
-        static auto startTime = std::chrono::high_resolution_clock::now();
-
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
-
         UniformBufferObject ubo{};
 
         object->runUpdateFunction(object, ubo);
@@ -1315,19 +1311,8 @@ private:
 
             VkDescriptorImageInfo imageInfo{};
             imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = textureImageView;
-            imageInfo.sampler = textureSampler;
-
-            VkWriteDescriptorSet descriptorWrite{};
-            descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrite.dstSet = object->descriptorSets[i];
-            descriptorWrite.dstBinding = 0;
-            descriptorWrite.dstArrayElement = 0;
-            descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            descriptorWrite.descriptorCount = 1;
-            descriptorWrite.pBufferInfo = &bufferInfo;
-            descriptorWrite.pImageInfo = nullptr;
-            descriptorWrite.pTexelBufferView = nullptr;
+            imageInfo.imageView = object->textureImageView;
+            imageInfo.sampler = object->textureSampler;
 
             std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
@@ -1462,9 +1447,6 @@ private:
         createCommandPool();
         createDepthResources();
         createFramebuffers();
-        createTextureImage();
-        createTextureImageView();
-        createTextureSampler();
         createCommandBuffers();
         createSyncObjects();
     }
@@ -1619,16 +1601,18 @@ private:
             }
 
             vkDestroyDescriptorPool(device, gameObjectPtr->descriptorPool, nullptr);
+
+
+            vkDestroySampler(device, gameObjectPtr->textureSampler, nullptr);
+            vkDestroyImageView(device, gameObjectPtr->textureImageView, nullptr);
+
+            vkDestroyImage(device, gameObjectPtr->textureImage, nullptr);
+            vkFreeMemory(device, gameObjectPtr->textureImageMemory, nullptr);
         }
 
 
 
 
-        vkDestroySampler(device, textureSampler, nullptr);
-        vkDestroyImageView(device, textureImageView, nullptr);
-
-        vkDestroyImage(device, textureImage, nullptr);
-        vkFreeMemory(device, textureImageMemory, nullptr);
 
         for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
             auto& gameObjectPtr = *it;
@@ -1670,7 +1654,7 @@ private:
         glfwTerminate();
     }
 public:
-    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
+    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::string imagePath, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
         auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos,  rot, vertices, indices);
 
         object->setUpdateFunction(updateFunction);
@@ -1679,8 +1663,11 @@ public:
 
         createGraphicsPipeline(object, vertShaderPath, fragShaderPath);
 
-
         createUniformBuffers(object);
+
+        createTextureImage(object, imagePath);
+        createTextureImageView(object);
+        createTextureSampler(object);
 
         createDescriptorPool(object);
         createDescriptorSets(object);
@@ -1793,23 +1780,23 @@ int main() {
         });
         */
 
-        instance.addGameObject(-1, {0, 0.3f, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {0, 0.3f, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             staticObjectUpdate(app, object, ubo);
         });
 
-        instance.addGameObject(-1, {0, -0.3f, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {0, -0.3f, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             staticObjectUpdate(app, object, ubo);
         });
 
-        instance.addGameObject(-1, {0.3f, 0, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {0.3f, 0, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             staticObjectUpdate(app, object, ubo);
         });
 
-        instance.addGameObject(-1, {-0.3f, 0, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {-0.3f, 0, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             staticObjectUpdate(app, object, ubo);
         });
 
-        instance.addGameObject(-1, {0,0,0}, {0,0,0} , objectVertices2 , objectIndices2, "spv/debug.vert.spv", "spv/debug.frag.spv", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {0,0,0}, {0,0,0} , objectVertices2 , objectIndices2, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             // float time = glfwGetTime();
             // float xOffset = sin(time) * 0.3f;
             // float rotationAngle = time;
