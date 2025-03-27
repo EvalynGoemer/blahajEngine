@@ -1,3 +1,7 @@
+# Compiled Files
 obj 
 spv
 engine_demo
+
+# Editor Files
+.vscode

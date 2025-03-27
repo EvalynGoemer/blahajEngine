@@ -12,6 +12,7 @@
 #include <array>
 #include <vector>
 #include <functional>
+#include <memory>
 
 namespace blahajEngine {
     struct Vertex {
@@ -72,6 +73,12 @@ namespace blahajEngine {
         OBJ_TYPE_BACKGROUND = 1
     };
 
+    struct camera {
+        glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 1.3f);
+        glm::vec3 cameraTarget = glm::vec3(0.0f, 0.0f, 0.0f);
+        glm::vec3 upVector    = glm::vec3(0.0f, 1.0f, 0.0f);
+    };
+
     struct gameObject {
         int objectType;
 
@@ -97,15 +104,15 @@ namespace blahajEngine {
         VkPipeline graphicsPipeline;
         VkPipelineLayout pipelineLayout;
 
-        std::function<void(UniformBufferObject& ubo)> updateFunction;
+        std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction;
 
-        void setUpdateFunction(std::function<void(UniformBufferObject& ubo)> func) {
+        void setUpdateFunction(std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> func) {
             updateFunction = func;
         }
 
-        void runUpdateFunction(UniformBufferObject& ubo) {
+        void runUpdateFunction(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo) {
             if (updateFunction) {
-                updateFunction(ubo);
+                updateFunction(object, ubo);
             }
         }
 
