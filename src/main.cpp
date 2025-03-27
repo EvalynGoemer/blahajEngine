@@ -1,6 +1,7 @@
 #define NDEBUG
 
 #include "engine/engine_structs.h"
+#include "engine/aabb.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -30,7 +31,6 @@
 #include <thread>
 #include <functional>
 #include <memory>
-
 
 namespace blahajEngine {
 class engine {
@@ -66,6 +66,8 @@ public:
     }
 
     void run() {
+        stbi_set_flip_vertically_on_load(1);
+
         initWindow();
         initVulkan();
         initEngine();
@@ -1654,8 +1656,8 @@ private:
         glfwTerminate();
     }
 public:
-    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::string imagePath, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
-        auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos,  rot, vertices, indices);
+    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::string imagePath, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
+        auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos, rot, scale, vertices, indices);
 
         object->setUpdateFunction(updateFunction);
 
@@ -1674,6 +1676,9 @@ public:
 
         createVertexBuffer(object);
         createIndexBuffer(object);
+
+        object->aabbMin = AABB2d::getAABBMinFromVertices(vertices);
+        object->aabbMax = AABB2d::getAABBMaxFromVertices(vertices);
 
         gameObjects.push_back(object);
     }
@@ -1696,7 +1701,7 @@ struct SnakeSegment {
 void staticObjectUpdate(blahajEngine::engine app, std::shared_ptr<blahajEngine::gameObject>& object, blahajEngine::UniformBufferObject& ubo) {
     glm::mat4 model = glm::mat4(1.0f);
     model = glm::translate(model, object->pos);
-    model = glm::scale(model, glm::vec3(0.1f));
+    model = glm::scale(model, object->scale);
 
     ubo.model = model;
     ubo.view = glm::lookAt(app.cam.cameraPos, app.cam.cameraTarget, app.cam.upVector);
@@ -1745,67 +1750,23 @@ int main() {
             0, 1, 2, 2, 3, 0
         };
 
-        /* Background
-        instance.addGameObject(0, {0,0,0}, {0,0,0} , objectVertices , objectIndices, "spv/tilemap.vert.spv", "spv/tilemap.frag.spv", [&app] (blahajEngine::UniformBufferObject& ubo) {
-            ubo.model = glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f));
-
-            ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, 1.3f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-
-            float zoom = 600.0f;
-
-            float width = app.swapChainExtent.width / zoom;
-            float height = app.swapChainExtent.height / zoom;
-            float left = -width / 2.0f;
-            float right = width / 2.0f;
-            float bottom = -height / 2.0f;
-            float top = height / 2.0f;
-            float nearPlane = 0.1f;
-            float farPlane = 10.0f;
-
-            ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
-            ubo.proj[1][1] *= -1;
-
-            ubo.textureAtlasWidth = 2;
-            ubo.textureAtlasHeight = 1;
-
-            ubo.tileWidth = 32;
-            ubo.tileHeight = 32;
-
-            ubo.tileMapWidth = app.bgTileMapWidth;
-            ubo.tileMapHeight = app.bgTileMapHeight;
-
-            for (int i = 0; i < app.bgTileMapArrayLength; ++i) {
-                ubo.tileMap[i].i = app.bgTileMap[i];
-            }
-        });
-        */
-
-        instance.addGameObject(-1, {0, 0.3f, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {0, 0.6f, -1}, {0,0,0}, glm::vec3(0.5f), objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/null.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             staticObjectUpdate(app, object, ubo);
         });
 
-        instance.addGameObject(-1, {0, -0.3f, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {0, -0.3f, -1}, {0,0,0}, glm::vec3(0.1f), objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             staticObjectUpdate(app, object, ubo);
         });
 
-        instance.addGameObject(-1, {0.3f, 0, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {0.3f, 0, -1}, {0,0,0}, glm::vec3(0.1f),  objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             staticObjectUpdate(app, object, ubo);
         });
 
-        instance.addGameObject(-1, {-0.3f, 0, -1}, {0,0,0}, objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        instance.addGameObject(-1, {-0.3f, 0, -1}, {0,0,0}, glm::vec3(0.1f), objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             staticObjectUpdate(app, object, ubo);
         });
 
-        instance.addGameObject(-1, {0,0,0}, {0,0,0} , objectVertices2 , objectIndices2, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
-            // float time = glfwGetTime();
-            // float xOffset = sin(time) * 0.3f;
-            // float rotationAngle = time;
-
-            glm::mat4 model = glm::mat4(1.0f);
-            // model = glm::translate(model, glm::vec3(xOffset, -0.3f, 0.0f));
-            // model = glm::rotate(model, rotationAngle, glm::vec3(0.0f, 0.0f, 1.0f));
-
-            // Handle input
+        instance.addGameObject(-1, {0,0,0}, {0,0,0}, glm::vec3(0.1f), objectVertices2 , objectIndices2, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/null.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             glm::vec2 velocity = {0.0f, 0.0f}; 
             float speed = 0.01f; 
             
@@ -1825,13 +1786,30 @@ int main() {
             if (glm::length(velocity) > 0.0f) {
                 velocity = glm::normalize(velocity);
             }
-            
-            // Apply speed to movement
-            object->pos.x += velocity.x * speed;
-            object->pos.y += velocity.y * speed;
 
+            int physicsSteps = 10;
+            speed = speed / physicsSteps;
+            for (int i = 0; i < physicsSteps; i++) {
+                glm::vec3 beforePos;
+
+                beforePos = object->pos;
+                object->pos.x += velocity.x * speed;
+
+                if (blahajEngine::AABB2d::intersectsAll(object, app.gameObjects)) {
+                    object->pos = beforePos;
+                }
+
+                beforePos = object->pos;
+                object->pos.y += velocity.y * speed;
+
+                if (blahajEngine::AABB2d::intersectsAll(object, app.gameObjects)) {
+                    object->pos = beforePos;
+                }
+            }
+
+            glm::mat4 model = glm::mat4(1.0f);
             model = glm::translate(model, object->pos);
-            model = glm::scale(model, glm::vec3(0.1f));
+            model = glm::scale(model, object->scale);
 
             ubo.model = model;
 
@@ -1879,58 +1857,7 @@ int main() {
     int foodX = rand() % 24, foodY = rand() % 24;
 
     app.setGameLoopCallback([&frameCounter, &snake, &directionX, &directionY, &foodX, &foodY](blahajEngine::engine& instance) {
-        // frameCounter++;
 
-        // // Handle input
-        // if (glfwGetKey(instance.window, GLFW_KEY_W) == GLFW_PRESS && directionY == 0) {
-        //     directionX = 0; directionY = 1;
-        // }
-        // if (glfwGetKey(instance.window, GLFW_KEY_A) == GLFW_PRESS && directionX == 0) {
-        //     directionX = -1; directionY = 0;
-        // }
-        // if (glfwGetKey(instance.window, GLFW_KEY_S) == GLFW_PRESS && directionY == 0) {
-        //     directionX = 0; directionY = -1;
-        // }
-        // if (glfwGetKey(instance.window, GLFW_KEY_D) == GLFW_PRESS && directionX == 0) {
-        //     directionX = 1; directionY = 0;
-        // }
-
-        // if (frameCounter % 12 == 0) {
-        //     // Move the snake
-        //     SnakeSegment newHead = {snake[0].x + directionX, snake[0].y + directionY};
-
-        //     // Check for collisions
-        //     if (newHead.x < 0 || newHead.x >= 24 || newHead.y < 0 || newHead.y >= 24) return; // Hit wall
-        //     for (auto& segment : snake) if (segment.x == newHead.x && segment.y == newHead.y) return; // Hit itself
-
-        //     snake.insert(snake.begin(), newHead);
-
-        //     // Check if the snake eats food
-        //     if (newHead.x == foodX && newHead.y == foodY) {
-        //         foodX = rand() % 24;
-        //         foodY = rand() % 24;
-        //     } else {
-        //         snake.pop_back();
-        //     }
-
-        //     // Render game onto tileMap
-        //     int tileMap[24][24] = {0};
-
-        //     for (auto& segment : snake) {
-        //         tileMap[segment.x][segment.y] = 1;
-        //     }
-        //     tileMap[foodX][foodY] = 2; // Food
-
-        //     // Compact 2D tileMap into 1D for use by blahajEngine
-        //     int index = 0;
-        //     for (int x = 0; x < instance.bgTileMapWidth; x++) {
-        //         for (int y = 0; y < instance.bgTileMapHeight; y++) {
-        //             if (index < instance.bgTileMapArrayLength) {
-        //                 instance.bgTileMap[index++] = tileMap[x][y];
-        //             }
-        //         }
-        //     }
-        // }
     });
 
     try {

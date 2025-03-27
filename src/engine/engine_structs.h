@@ -86,6 +86,9 @@ namespace blahajEngine {
         glm::vec3 rot;
         glm::vec3 scale;
 
+        glm::vec2 aabbMin;
+        glm::vec2 aabbMax;
+
         std::vector<Vertex> vertices;
         std::vector<uint16_t> indices;
 
@@ -122,10 +125,11 @@ namespace blahajEngine {
             }
         }
 
-        gameObject(int objectType, glm::vec3 pos, glm::vec3 rot, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
+        gameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
             this->objectType = objectType;
             this->pos = pos;
             this->rot = rot;
+            this->scale = scale;
             this->vertices = vertices;
             this->indices = indices;
         }
