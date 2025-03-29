@@ -91,6 +91,10 @@ namespace blahajEngine {
         glm::vec2 aabbMax;
 
         std::string scriptFile;
+        std::string script;
+
+        bool markedForDeletion = false;
+        bool deleted = false;
 
         std::vector<Vertex> vertices;
         std::vector<uint16_t> indices;
@@ -136,5 +140,11 @@ namespace blahajEngine {
             this->vertices = vertices;
             this->indices = indices;
         }
+
+        #ifndef NDEBUG
+        ~gameObject() {
+            std::cout << "GameObject Running Script: " << scriptFile << " Destroyed & Not Leaked"<< std::endl;
+        }
+        #endif
     };
 }

@@ -1,4 +1,4 @@
-function normalizeVelocity(velocityX, velocityY)
+local function normalizeVelocity(velocityX, velocityY)
     local magnitude = math.sqrt(velocityX^2 + velocityY^2)
 
     if magnitude > 0 then
@@ -20,11 +20,15 @@ local function sign(value)
 end
 
 function Update()
-    if SecondRun == nil then
+    if getKeyPressed(engine, "P") then
+        deleteGameObject(object)
+    end
+
+    if NotFirstRun == nil then
         X = 0
         Y = 0
 
-        SecondRun = true
+        NotFirstRun = true
     end
 
     local speed = 0.01

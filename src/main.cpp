@@ -24,6 +24,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <sstream>
 #include <iostream>
 #include <limits>
 #include <optional>
@@ -59,6 +60,7 @@ public:
     VkExtent2D swapChainExtent;
 
     std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjects;
+    std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjectsDeletionQueue;
 private:
     const std::string engineName = "Blahaj Engine";
 
@@ -1541,6 +1543,18 @@ private:
 
             drawFrame();
 
+            gameObjects.erase(
+                std::remove_if(gameObjects.begin(), gameObjects.end(), [this](const std::shared_ptr<gameObject>& obj) {
+                    if (obj->markedForDeletion) {
+                        obj->markedForDeletion = false;
+                        deleteGameObject(obj);
+                        return true;
+                    }
+                        return false;
+                    }),
+                gameObjects.end()
+            );
+
             last_time = current_time;
         }
 
@@ -1648,6 +1662,18 @@ private:
         glfwDestroyWindow(window);
 
         glfwTerminate();
+
+        lua_pushnil(L);
+        lua_setglobal(L, "engine");
+
+        lua_pushnil(L);
+        lua_setglobal(L, "object");
+
+        lua_getglobal(L, "collectgarbage");  // Get the 'collectgarbage' function
+        lua_pushstring(L, "collect");        // Push the argument 'collect'
+        if (lua_pcall(L, 1, 0, 0) != LUA_OK) {  // Call collectgarbage("collect")
+            std::cerr << "Error running collectgarbage: " << lua_tostring(L, -1) << std::endl;
+        }
     }
 public:
     static int lua_addGameObject(lua_State *L) {
@@ -1674,30 +1700,6 @@ public:
         const char* scriptPath = lua_tostring(L, 12);
 
         app->addGameObject(-1, pos, rot, scale, vertices, indices, vertexShader, fragmentShader, texturePath, scriptPath, [app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
-            if(object->scriptFile == "scripts/internal_engine/static") {
-                glm::mat4 model = glm::mat4(1.0f);
-                model = glm::translate(model, object->pos);
-                model = glm::scale(model, object->scale);
-
-                ubo.model = model;
-                ubo.view = glm::lookAt(app->cam.cameraPos, app->cam.cameraTarget, app->cam.upVector);
-
-                float zoom = 600.0f;
-
-                float width = app->swapChainExtent.width / zoom;
-                float height = app->swapChainExtent.height / zoom;
-                float left = -width / 2.0f;
-                float right = width / 2.0f;
-                float bottom = -height / 2.0f;
-                float top = height / 2.0f;
-                float nearPlane = 0.1f;
-                float farPlane = 10.0f;
-
-                ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
-                ubo.proj[1][1] *= -1;
-
-                return;
-            }
 
             push_shared_ptr_to_lua(app->L, object);
             lua_setglobal(app->L, "object");
@@ -1705,7 +1707,7 @@ public:
             push_raw_ptr_to_lua(app->L, &ubo);
             lua_setglobal(app->L, "ubo");
 
-            if (luaL_dofile(app->L, object->scriptFile.c_str()) != LUA_OK) {
+            if (luaL_dostring(app->L, object->script.c_str()) != LUA_OK) {
                 const char* error = lua_tostring(app->L, -1);
                 lua_pop(app->L, 1);
                 throw std::runtime_error("BlahajEngine [LUA]: " + std::string(error));
@@ -1744,6 +1746,14 @@ public:
             ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
             ubo.proj[1][1] *= -1;
         });
+
+        return 0;
+    }
+
+    static int lua_deleteGameObject(lua_State *L) {
+        auto obj = pop_shared_ptr_from_lua<gameObject>(L, 1);
+
+        obj->markedForDeletion = true;
 
         return 0;
     }
@@ -1810,6 +1820,7 @@ public:
 
     void lua_bindAllEngineFuncs() {
         lua_register(L, "addGameObject", lua_addGameObject);
+        lua_register(L, "deleteGameObject", lua_deleteGameObject);
         lua_register(L, "moveGameObject", lua_moveGameObject);
         lua_register(L, "camLookAtGameObject", lua_camLookAtGameObject);
         lua_register(L, "getKeyPressed", lua_getKeyPressed);
@@ -1820,6 +1831,20 @@ public:
 
     void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::string imagePath, std::string scriptFile, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
         auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos, rot, scale, vertices, indices);
+
+        object->scriptFile = scriptFile;
+
+        std::ifstream file(scriptFile);
+        if (!file) {
+            throw std::runtime_error("BlahajEngine [LUA]: Could not find script file " + object->scriptFile);
+        }
+
+        std::stringstream buffer;
+        buffer << file.rdbuf();
+
+        object->script = buffer.str();
+
+        file.close();
 
         object->setUpdateFunction(updateFunction);
 
@@ -1842,11 +1867,37 @@ public:
         object->aabbMin = AABB2d::getAABBMinFromVertices(vertices);
         object->aabbMax = AABB2d::getAABBMaxFromVertices(vertices);
 
-        object->scriptFile = scriptFile;
-
         gameObjects.push_back(object);
     }
-};
+
+    void deleteGameObject(std::shared_ptr<gameObject> gameObjectPtr) {
+            vkDeviceWaitIdle(device);
+
+            vkDestroyPipeline(device, gameObjectPtr->graphicsPipeline, nullptr);
+            vkDestroyPipelineLayout(device, gameObjectPtr->pipelineLayout, nullptr);
+
+            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+                vkDestroyBuffer(device, gameObjectPtr->uniformBuffers[i], nullptr);
+                vkFreeMemory(device, gameObjectPtr->uniformBuffersMemory[i], nullptr);
+            }
+
+            vkDestroyDescriptorPool(device, gameObjectPtr->descriptorPool, nullptr);
+
+            vkDestroySampler(device, gameObjectPtr->textureSampler, nullptr);
+            vkDestroyImageView(device, gameObjectPtr->textureImageView, nullptr);
+
+            vkDestroyImage(device, gameObjectPtr->textureImage, nullptr);
+            vkFreeMemory(device, gameObjectPtr->textureImageMemory, nullptr);
+
+            vkDestroyDescriptorSetLayout(device, gameObjectPtr->descriptorSetLayout, nullptr);
+
+            vkDestroyBuffer(device, gameObjectPtr->indexBuffer, nullptr);
+            vkFreeMemory(device, gameObjectPtr->indexBufferMemory, nullptr);
+
+            vkDestroyBuffer(device, gameObjectPtr->vertexBuffer, nullptr);
+            vkFreeMemory(device, gameObjectPtr->vertexBufferMemory, nullptr);
+    }
+    };
 }
 
 int main() {
