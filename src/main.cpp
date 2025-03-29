@@ -1,7 +1,8 @@
 #define NDEBUG
 
-#include "engine/engine_structs.h"
 #include "engine/aabb.h"
+#include "engine/engine_structs.h"
+#include "engine/lua.h"
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -14,6 +15,8 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
+
+#include <lua.hpp>
 
 #include <algorithm>
 #include <array>
@@ -35,35 +38,11 @@
 namespace blahajEngine {
 class engine {
 public:
-    std::string programName;
     float target_fps = 120.0f;
 
-    int bgTileMapWidth;
-    int bgTileMapHeight;
-    int bgTileMap[24*24] = {};
-    int bgTileMapArrayLength;
+    lua_State* L;
 
     camera cam;
-
-    void setGameLoopCallback(std::function<void(blahajEngine::engine&)> cb) {
-        glcallback = cb;
-    }
-
-    void triggerGameLoopCallback() {
-        if (glcallback) {
-            glcallback(*this);
-        }
-    }
-
-    void setGameInitCallback(std::function<void(blahajEngine::engine&)> cb) {
-        gicallback = cb;
-    }
-
-    void triggerGameInitCallback() {
-        if (gicallback) {
-            gicallback(*this);
-        }
-    }
 
     void run() {
         stbi_set_flip_vertically_on_load(1);
@@ -82,9 +61,6 @@ public:
     std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjects;
 private:
     const std::string engineName = "Blahaj Engine";
-
-    std::function<void(blahajEngine::engine&)> glcallback;
-    std::function<void(blahajEngine::engine&)> gicallback;
 
     const uint MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t currentFrame = 0;
@@ -177,7 +153,7 @@ private:
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
         glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-        window = glfwCreateWindow(WIDTH, HEIGHT, programName.c_str(), nullptr, nullptr);
+        window = glfwCreateWindow(WIDTH, HEIGHT, "blahajEngine Game", nullptr, nullptr);
         glfwSetWindowUserPointer(window, this);
         glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
     }
@@ -224,7 +200,7 @@ private:
     void createInstance() {
         VkApplicationInfo appInfo{};
         appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-        appInfo.pApplicationName = programName.c_str();
+        appInfo.pApplicationName = "blahajEngine Game";
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = engineName.c_str();
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
@@ -1454,7 +1430,31 @@ private:
     }
 
     void initEngine() {
-        triggerGameInitCallback();
+        L = luaL_newstate();
+        luaL_openlibs(L);
+
+        push_raw_ptr_to_lua(L, this);
+        lua_setglobal(L, "engine");
+
+        lua_bindAllEngineFuncs();
+
+        if (luaL_dofile(L, "scripts/init.lua") != LUA_OK) {
+            const char* error = lua_tostring(L, -1);
+            lua_pop(L, 1);
+            throw std::runtime_error("BlahajEngine [LUA]: " + std::string(error));
+        }
+
+        lua_getglobal(L, "Init");
+
+        if (lua_isfunction(L, -1)) {
+            if (lua_pcall(L, 0, 0, 0) != LUA_OK) {
+                const char* error = lua_tostring(L, -1);
+                lua_pop(L, 1);
+                throw std::runtime_error("BlahajEngine [LUA]: " + std::string(error));
+            }
+        } else {
+            throw std::runtime_error("BlahajEngine [LUA]: Could not find function Init() inside scripts/init.lua");
+        }
     }
 
     void drawFrame() {
@@ -1539,8 +1539,6 @@ private:
 
             glfwPollEvents();
 
-            triggerGameLoopCallback();
-
             drawFrame();
 
             last_time = current_time;
@@ -1612,10 +1610,6 @@ private:
             vkFreeMemory(device, gameObjectPtr->textureImageMemory, nullptr);
         }
 
-
-
-
-
         for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
             auto& gameObjectPtr = *it;
 
@@ -1656,7 +1650,175 @@ private:
         glfwTerminate();
     }
 public:
-    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::string imagePath, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
+    static int lua_addGameObject(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+
+        glm::vec3 pos = {lua_tonumber(L, 2), lua_tonumber(L, 3), lua_tonumber(L, 4)};
+        glm::vec3 rot = {lua_tonumber(L, 5), lua_tonumber(L, 6), lua_tonumber(L, 7)};
+        glm::vec3 scale = glm::vec3(lua_tonumber(L, 8));
+
+        std::vector<blahajEngine::Vertex> vertices = {
+            {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+            {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+            {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+            {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
+        };
+
+        std::vector<uint16_t> indices = {
+            0, 1, 2, 2, 3, 0
+        };
+
+        const char* vertexShader = lua_tostring(L, 9);
+        const char* fragmentShader = lua_tostring(L, 10);
+        const char* texturePath = lua_tostring(L, 11);
+        const char* scriptPath = lua_tostring(L, 12);
+
+        app->addGameObject(-1, pos, rot, scale, vertices, indices, vertexShader, fragmentShader, texturePath, scriptPath, [app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+            if(object->scriptFile == "scripts/internal_engine/static") {
+                glm::mat4 model = glm::mat4(1.0f);
+                model = glm::translate(model, object->pos);
+                model = glm::scale(model, object->scale);
+
+                ubo.model = model;
+                ubo.view = glm::lookAt(app->cam.cameraPos, app->cam.cameraTarget, app->cam.upVector);
+
+                float zoom = 600.0f;
+
+                float width = app->swapChainExtent.width / zoom;
+                float height = app->swapChainExtent.height / zoom;
+                float left = -width / 2.0f;
+                float right = width / 2.0f;
+                float bottom = -height / 2.0f;
+                float top = height / 2.0f;
+                float nearPlane = 0.1f;
+                float farPlane = 10.0f;
+
+                ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
+                ubo.proj[1][1] *= -1;
+
+                return;
+            }
+
+            push_shared_ptr_to_lua(app->L, object);
+            lua_setglobal(app->L, "object");
+
+            push_raw_ptr_to_lua(app->L, &ubo);
+            lua_setglobal(app->L, "ubo");
+
+            if (luaL_dofile(app->L, object->scriptFile.c_str()) != LUA_OK) {
+                const char* error = lua_tostring(app->L, -1);
+                lua_pop(app->L, 1);
+                throw std::runtime_error("BlahajEngine [LUA]: " + std::string(error));
+            }
+
+            lua_getglobal(app->L, "Update");
+
+            if (lua_isfunction(app->L, -1)) {
+                if (lua_pcall(app->L, 0, 0, 0) != LUA_OK) {
+                    const char* error = lua_tostring(app->L, -1);
+                    lua_pop(app->L, 1);
+                    throw std::runtime_error("BlahajEngine [LUA]: " + std::string(error));
+                }
+            } else {
+                throw std::runtime_error("BlahajEngine [LUA]: Could not find function Update() inside " + object->scriptFile);
+            }
+
+            glm::mat4 model = glm::mat4(1.0f);
+            model = glm::translate(model, object->pos);
+            model = glm::scale(model, object->scale);
+
+            ubo.model = model;
+            ubo.view = glm::lookAt(app->cam.cameraPos, app->cam.cameraTarget, app->cam.upVector);
+
+            float zoom = 600.0f;
+
+            float width = app->swapChainExtent.width / zoom;
+            float height = app->swapChainExtent.height / zoom;
+            float left = -width / 2.0f;
+            float right = width / 2.0f;
+            float bottom = -height / 2.0f;
+            float top = height / 2.0f;
+            float nearPlane = 0.1f;
+            float farPlane = 10.0f;
+
+            ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
+            ubo.proj[1][1] *= -1;
+        });
+
+        return 0;
+    }
+
+    static int lua_moveGameObject(lua_State *L) {
+        auto obj = pop_shared_ptr_from_lua<gameObject>(L, 1);
+
+        float x = lua_tonumber(L, 2);
+        float y = lua_tonumber(L, 3);
+        float z = lua_tonumber(L, 4);
+
+        obj->pos = {x, y, z};
+
+        return 0;
+    }
+
+    static int lua_camLookAtGameObject(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+        auto obj = pop_shared_ptr_from_lua<gameObject>(L, 2);
+
+        app->cam.cameraPos = obj->pos;
+        app->cam.cameraPos.z = 5;
+
+        app->cam.cameraTarget = obj->pos;
+
+        return 0;
+    }
+
+    static int lua_getKeyPressed(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+        const char* str = lua_tostring(L, 2);
+
+        lua_pushboolean(L, glfwGetKey(app->window, str[0]) == GLFW_PRESS);
+
+        return 1;
+    }
+
+    static int lua_AABB2D_intersectsAll(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+        auto obj = pop_shared_ptr_from_lua<gameObject>(L, 2);
+
+        lua_pushboolean(L, AABB2d::intersectsAll(obj, app->gameObjects));
+
+        return 1;
+    }
+
+    static int lua_setProgramName(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+        auto programName = lua_tostring(L, 2);
+
+        glfwSetWindowTitle(app->window, programName);
+
+        return 0;
+    }
+
+    static int lua_setTargetFPS(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+        int fps = lua_tonumber(L, 2);
+
+        app->target_fps = fps;
+
+        return 0;
+    }
+
+    void lua_bindAllEngineFuncs() {
+        lua_register(L, "addGameObject", lua_addGameObject);
+        lua_register(L, "moveGameObject", lua_moveGameObject);
+        lua_register(L, "camLookAtGameObject", lua_camLookAtGameObject);
+        lua_register(L, "getKeyPressed", lua_getKeyPressed);
+        lua_register(L, "AABB2D_intersectsAll", lua_AABB2D_intersectsAll);
+        lua_register(L, "setProgramName", lua_setProgramName);
+        lua_register(L, "setTargetFPS", lua_setTargetFPS);
+    }
+
+    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::string imagePath, std::string scriptFile, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
         auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos, rot, scale, vertices, indices);
 
         object->setUpdateFunction(updateFunction);
@@ -1680,185 +1842,15 @@ public:
         object->aabbMin = AABB2d::getAABBMinFromVertices(vertices);
         object->aabbMax = AABB2d::getAABBMaxFromVertices(vertices);
 
+        object->scriptFile = scriptFile;
+
         gameObjects.push_back(object);
     }
 };
 }
 
-void reverseArray(int arr[], int size) {
-    int left = 0, right = size - 1;
-    while (left < right) {
-        std::swap(arr[left], arr[right]);
-        left++;
-        right--;
-    }
-}
-
-struct SnakeSegment {
-    int x, y;
-};
-
-void staticObjectUpdate(blahajEngine::engine app, std::shared_ptr<blahajEngine::gameObject>& object, blahajEngine::UniformBufferObject& ubo) {
-    glm::mat4 model = glm::mat4(1.0f);
-    model = glm::translate(model, object->pos);
-    model = glm::scale(model, object->scale);
-
-    ubo.model = model;
-    ubo.view = glm::lookAt(app.cam.cameraPos, app.cam.cameraTarget, app.cam.upVector);
-
-    float zoom = 600.0f;
-
-    float width = app.swapChainExtent.width / zoom;
-    float height = app.swapChainExtent.height / zoom;
-    float left = -width / 2.0f;
-    float right = width / 2.0f;
-    float bottom = -height / 2.0f;
-    float top = height / 2.0f;
-    float nearPlane = 0.1f;
-    float farPlane = 10.0f;
-
-    ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
-    ubo.proj[1][1] *= -1;
-}
-
 int main() {
     blahajEngine::engine app;
-
-    app.programName = "Blahaj Engine Demo: Top Down 2D Game";
-    app.target_fps = 90.0f;
-
-    app.setGameInitCallback([&app](blahajEngine::engine& instance) {
-        std::vector<blahajEngine::Vertex> objectVertices = {
-            {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-            {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-            {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-            {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-        };
-
-        std::vector<uint16_t> objectIndices = {
-            0, 1, 2, 2, 3, 0
-        };
-
-        std::vector<blahajEngine::Vertex> objectVertices2 = {
-            {{-0.3f, -0.3f, 1.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-            {{0.3f, -0.3f, 1.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-            {{0.3f, 0.3f, 1.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-            {{-0.3f, 0.3f, 1.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-        };
-
-        std::vector<uint16_t> objectIndices2 = {
-            0, 1, 2, 2, 3, 0
-        };
-
-        instance.addGameObject(-1, {0, 0.6f, -1}, {0,0,0}, glm::vec3(0.5f), objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/null.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
-            staticObjectUpdate(app, object, ubo);
-        });
-
-        instance.addGameObject(-1, {0, -0.3f, -1}, {0,0,0}, glm::vec3(0.1f), objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
-            staticObjectUpdate(app, object, ubo);
-        });
-
-        instance.addGameObject(-1, {0.3f, 0, -1}, {0,0,0}, glm::vec3(0.1f),  objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
-            staticObjectUpdate(app, object, ubo);
-        });
-
-        instance.addGameObject(-1, {-0.3f, 0, -1}, {0,0,0}, glm::vec3(0.1f), objectVertices, objectIndices, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/debug_alt.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
-            staticObjectUpdate(app, object, ubo);
-        });
-
-        instance.addGameObject(-1, {0,0,0}, {0,0,0}, glm::vec3(0.1f), objectVertices2 , objectIndices2, "spv/debug.vert.spv", "spv/debug.frag.spv", "assets/null.png", [&app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
-            glm::vec2 velocity = {0.0f, 0.0f}; 
-            float speed = 0.01f; 
-            
-            if (glfwGetKey(app.window, GLFW_KEY_W) == GLFW_PRESS) {
-                velocity.y += 1.0f;
-            }
-            if (glfwGetKey(app.window, GLFW_KEY_A) == GLFW_PRESS) {
-                velocity.x -= 1.0f;
-            }
-            if (glfwGetKey(app.window, GLFW_KEY_S) == GLFW_PRESS) {
-                velocity.y -= 1.0f;
-            }
-            if (glfwGetKey(app.window, GLFW_KEY_D) == GLFW_PRESS) {
-                velocity.x += 1.0f;
-            }
-            
-            if (glm::length(velocity) > 0.0f) {
-                velocity = glm::normalize(velocity);
-            }
-
-            int physicsSteps = 10;
-            speed = speed / physicsSteps;
-            for (int i = 0; i < physicsSteps; i++) {
-                glm::vec3 beforePos;
-
-                beforePos = object->pos;
-                object->pos.x += velocity.x * speed;
-
-                if (blahajEngine::AABB2d::intersectsAll(object, app.gameObjects)) {
-                    object->pos = beforePos;
-                }
-
-                beforePos = object->pos;
-                object->pos.y += velocity.y * speed;
-
-                if (blahajEngine::AABB2d::intersectsAll(object, app.gameObjects)) {
-                    object->pos = beforePos;
-                }
-            }
-
-            glm::mat4 model = glm::mat4(1.0f);
-            model = glm::translate(model, object->pos);
-            model = glm::scale(model, object->scale);
-
-            ubo.model = model;
-
-            app.cam.cameraPos = object->pos;
-            app.cam.cameraPos.z = 1.3;
-
-            app.cam.cameraTarget = object->pos;
-
-            ubo.view = glm::lookAt(app.cam.cameraPos, app.cam.cameraTarget, app.cam.upVector);
-
-            float zoom = 600.0f;
-
-            float width = app.swapChainExtent.width / zoom;
-            float height = app.swapChainExtent.height / zoom;
-            float left = -width / 2.0f;
-            float right = width / 2.0f;
-            float bottom = -height / 2.0f;
-            float top = height / 2.0f;
-            float nearPlane = 0.1f;
-            float farPlane = 10.0f;
-
-            ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
-            ubo.proj[1][1] *= -1;
-        });
-
-    });
-
-    enum tileIds {
-        BLANK = 0,
-        DEBUG_TILE = 1,
-        DEBUG_TILE_ALT = 2
-    };
-
-    app.bgTileMapWidth = 24;
-    app.bgTileMapHeight = 24;
-
-    app.bgTileMapArrayLength = app.bgTileMapWidth * app.bgTileMapHeight;
-
-    int frameCounter;
-
-    std::srand(std::time(nullptr));
-
-    std::vector<SnakeSegment> snake = {{12, 12}};
-    int directionX = 1, directionY = 0;
-    int foodX = rand() % 24, foodY = rand() % 24;
-
-    app.setGameLoopCallback([&frameCounter, &snake, &directionX, &directionY, &foodX, &foodY](blahajEngine::engine& instance) {
-
-    });
 
     try {
         app.run();

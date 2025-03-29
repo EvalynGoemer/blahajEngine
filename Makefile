@@ -1,6 +1,6 @@
 # Compiler and linker flags
 CFLAGS = -std=c++17 -O2 -Wall
-LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi
+LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi -llua -lm
 
 # Source and object directories
 SRC_DIR = src

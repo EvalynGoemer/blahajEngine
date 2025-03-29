@@ -10,5 +10,6 @@ You will need the following packages for building on Arch Linux
 - glfw
 - glm
 - stb
+- lua
 
 With the correct packages installed you can just run `make` with the included Makefile to compile the program and the shaders

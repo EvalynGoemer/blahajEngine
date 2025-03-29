@@ -13,6 +13,7 @@
 #include <vector>
 #include <functional>
 #include <memory>
+#include <string>
 
 namespace blahajEngine {
     struct Vertex {
@@ -88,6 +89,8 @@ namespace blahajEngine {
 
         glm::vec2 aabbMin;
         glm::vec2 aabbMax;
+
+        std::string scriptFile;
 
         std::vector<Vertex> vertices;
         std::vector<uint16_t> indices;
