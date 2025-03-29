@@ -66,6 +66,18 @@ namespace blahajEngine {
             return aabbMax;
         }
 
+        static glm::vec2 getAABBMin(camera object) {
+            glm::vec2 scaledAABB = glm::vec2(object.aabbMax.x * object.cameraScale.x, object.aabbMax.y * object.cameraScale.y);
+            glm::vec2 aabbMin = glm::vec2(object.cameraPos.x - scaledAABB.x, object.cameraPos.y - scaledAABB.y);
+            return aabbMin;
+        }
+
+        static glm::vec2 getAABBMax(camera object) {
+            glm::vec2 scaledAABB = glm::vec2(object.aabbMax.x * object.cameraScale.x, object.aabbMax.y * object.cameraScale.y);
+            glm::vec2 aabbMax = glm::vec2(object.cameraPos.x + scaledAABB.x, object.cameraPos.y + scaledAABB.y);
+            return aabbMax;
+        }
+
         static bool intersects(std::shared_ptr<gameObject> objectA, std::shared_ptr<gameObject> objectB) {
             glm::vec2 aabbMinA = getAABBMin(objectA);
             glm::vec2 aabbMaxA = getAABBMax(objectA);
@@ -76,6 +88,18 @@ namespace blahajEngine {
                     aabbMinA.x > aabbMaxB.x ||
                     aabbMaxA.y < aabbMinB.y ||
                     aabbMinA.y > aabbMaxB.y);
+        }
+
+        static bool intersects(std::shared_ptr<gameObject> objectA, camera objectB) {
+            glm::vec2 aabbMinA = getAABBMin(objectA);
+            glm::vec2 aabbMaxA = getAABBMax(objectA);
+            glm::vec2 aabbMinB = getAABBMin(objectB);
+            glm::vec2 aabbMaxB = getAABBMax(objectB);
+
+            return !(aabbMaxA.x < aabbMinB.x ||
+            aabbMinA.x > aabbMaxB.x ||
+            aabbMaxA.y < aabbMinB.y ||
+            aabbMinA.y > aabbMaxB.y);
         }
 
         static bool contains(std::shared_ptr<gameObject> objectA, const glm::vec2& point) {

@@ -14,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <iostream>
 
 namespace blahajEngine {
     struct Vertex {
@@ -76,8 +77,12 @@ namespace blahajEngine {
 
     struct camera {
         glm::vec3 cameraPos   = glm::vec3(0.0f, 0.0f, 1.3f);
+        glm::vec3 cameraScale = glm::vec3(1);
         glm::vec3 cameraTarget = glm::vec3(0.0f, 0.0f, 0.0f);
         glm::vec3 upVector    = glm::vec3(0.0f, 1.0f, 0.0f);
+
+        glm::vec2 aabbMin;
+        glm::vec2 aabbMax;
     };
 
     struct gameObject {
@@ -109,7 +114,6 @@ namespace blahajEngine {
         VkSampler textureSampler;
         VkDeviceMemory textureImageMemory;
 
-        VkDescriptorSetLayout descriptorSetLayout;
         VkDescriptorPool descriptorPool;
         std::vector<VkDescriptorSet> descriptorSets;
 
@@ -117,8 +121,7 @@ namespace blahajEngine {
         std::vector<VkDeviceMemory> uniformBuffersMemory;
         std::vector<void*> uniformBuffersMapped;
 
-        VkPipeline graphicsPipeline;
-        VkPipelineLayout pipelineLayout;
+        int pipelineID;
 
         std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction;
 

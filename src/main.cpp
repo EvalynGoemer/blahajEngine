@@ -35,6 +35,7 @@
 #include <thread>
 #include <functional>
 #include <memory>
+#include <map>
 
 namespace blahajEngine {
 class engine {
@@ -60,7 +61,11 @@ public:
     VkExtent2D swapChainExtent;
 
     std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjects;
-    std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjectsDeletionQueue;
+
+    std::map<int, VkPipeline> pipelines;
+    std::map<int, VkPipelineLayout> pipelineLayouts;
+    std::map<int, VkDescriptorSetLayout> descriptorSetLayouts;
+
 private:
     const std::string engineName = "Blahaj Engine";
 
@@ -639,7 +644,7 @@ private:
         }
     }
 
-    void createDescriptorSetLayout(std::shared_ptr<blahajEngine::gameObject> object) {
+    void createDescriptorSetLayout(int id) {
         VkDescriptorSetLayoutBinding uboLayoutBinding{};
         uboLayoutBinding.binding = 0;
         uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -660,7 +665,7 @@ private:
         layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
         layoutInfo.pBindings = bindings.data();
 
-        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &object->descriptorSetLayout) != VK_SUCCESS) {
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayouts[id]) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create descriptor set layout!");
         }
     }
@@ -701,7 +706,9 @@ private:
         VK_DYNAMIC_STATE_SCISSOR
     };
 
-    void createGraphicsPipeline(std::shared_ptr<blahajEngine::gameObject> object, std::string vertShaderPath, std::string fragShaderPath) {
+    void createGraphicsPipeline(int id, std::string vertShaderPath, std::string fragShaderPath) {
+        createDescriptorSetLayout(id);
+
         auto vertShaderCode = readFile(vertShaderPath);
         auto fragShaderCode = readFile(fragShaderPath);
 
@@ -799,9 +806,9 @@ private:
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
-        pipelineLayoutInfo.pSetLayouts = &object->descriptorSetLayout;
+        pipelineLayoutInfo.pSetLayouts = &descriptorSetLayouts[id];
 
-        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &object->pipelineLayout) != VK_SUCCESS) {
+        if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayouts[id]) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create pipeline layout!");
         }
 
@@ -817,12 +824,12 @@ private:
         pipelineInfo.pDepthStencilState = &depthStencil;
         pipelineInfo.pColorBlendState = &colorBlending;
         pipelineInfo.pDynamicState = &dynamicState;
-        pipelineInfo.layout = object->pipelineLayout;
+        pipelineInfo.layout = pipelineLayouts[id];
         pipelineInfo.renderPass = renderPass;
         pipelineInfo.subpass = 0;
         pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
 
-        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &object->graphicsPipeline) != VK_SUCCESS) {
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipelines[id]) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create graphics pipeline!");
         }
 
@@ -1270,7 +1277,7 @@ private:
     }
 
     void createDescriptorSets(std::shared_ptr<blahajEngine::gameObject> object) {
-        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, object->descriptorSetLayout);
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayouts[object->pipelineID]);
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorPool = object->descriptorPool;
@@ -1330,7 +1337,6 @@ private:
         }
     }
 
-
     void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
         VkCommandBufferBeginInfo beginInfo{};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1369,21 +1375,26 @@ private:
         scissor.extent = swapChainExtent;
         vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
-
+        int lastBoundPipelineID = -1;
         for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
             auto& gameObjectPtr = *it;
 
-            vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gameObjectPtr->graphicsPipeline);
+            if(AABB2d::intersects(gameObjectPtr, cam)) {
+                if (lastBoundPipelineID != gameObjectPtr->pipelineID) {
+                    vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelines[gameObjectPtr->pipelineID]);
+                    lastBoundPipelineID = gameObjectPtr->pipelineID;
+                }
 
-            VkBuffer vertexBuffers[] = {gameObjectPtr->vertexBuffer};
-            VkDeviceSize offsets[] = {0};
-            vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+                VkBuffer vertexBuffers[] = {gameObjectPtr->vertexBuffer};
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-            vkCmdBindIndexBuffer(commandBuffer, gameObjectPtr->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+                vkCmdBindIndexBuffer(commandBuffer, gameObjectPtr->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
-            vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, gameObjectPtr->pipelineLayout, 0, 1, &gameObjectPtr->descriptorSets[currentFrame], 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts[gameObjectPtr->pipelineID], 0, 1, &gameObjectPtr->descriptorSets[currentFrame], 0, nullptr);
 
-            vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(gameObjectPtr->indices.size()), 1, 0, 0, 0);
+                vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(gameObjectPtr->indices.size()), 1, 0, 0, 0);
+            }
         }
         vkCmdEndRenderPass(commandBuffer);
 
@@ -1597,11 +1608,12 @@ private:
     void cleanup() {
         cleanupSwapChain();
 
-        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
-            auto& gameObjectPtr = *it;
+        for (auto it = pipelines.begin(); it != pipelines.end(); ++it) {
+            vkDestroyPipeline(device, it->second, nullptr);
+        }
 
-            vkDestroyPipeline(device, gameObjectPtr->graphicsPipeline, nullptr);
-            vkDestroyPipelineLayout(device, gameObjectPtr->pipelineLayout, nullptr);
+        for (auto it = pipelineLayouts.begin(); it != pipelineLayouts.end(); ++it) {
+            vkDestroyPipelineLayout(device, it->second, nullptr);
         }
 
         vkDestroyRenderPass(device, renderPass, nullptr);
@@ -1624,10 +1636,8 @@ private:
             vkFreeMemory(device, gameObjectPtr->textureImageMemory, nullptr);
         }
 
-        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
-            auto& gameObjectPtr = *it;
-
-            vkDestroyDescriptorSetLayout(device, gameObjectPtr->descriptorSetLayout, nullptr);
+        for (auto it = descriptorSetLayouts.begin(); it != descriptorSetLayouts.end(); ++it) {
+            vkDestroyDescriptorSetLayout(device, it->second, nullptr);
         }
 
         for (auto it = gameObjects.begin(); it != gameObjects.end(); ) {
@@ -1676,6 +1686,18 @@ private:
         }
     }
 public:
+    static int lua_addPipeline(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+        int pipelineID = lua_tonumber(L, 2);
+        // const char* vertexShader = lua_tostring(L, 3);
+        // const char* fragmentShader = lua_tostring(L, 4);
+
+        app->createGraphicsPipeline(pipelineID, "spv/debug.vert.spv", "spv/debug.frag.spv");
+
+        return 0;
+    }
+
+
     static int lua_addGameObject(lua_State *L) {
         auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
 
@@ -1694,35 +1716,38 @@ public:
             0, 1, 2, 2, 3, 0
         };
 
-        const char* vertexShader = lua_tostring(L, 9);
-        const char* fragmentShader = lua_tostring(L, 10);
-        const char* texturePath = lua_tostring(L, 11);
-        const char* scriptPath = lua_tostring(L, 12);
+        int pipelineID = lua_tointeger(L, 9);
+        const char* texturePath = lua_tostring(L, 10);
+        const char* scriptPath = "nil";
+        if (lua_isstring(L, 11)) {
+            scriptPath = lua_tostring(L, 11);
+        }
 
-        app->addGameObject(-1, pos, rot, scale, vertices, indices, vertexShader, fragmentShader, texturePath, scriptPath, [app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        app->addGameObject(-1, pos, rot, scale, vertices, indices, pipelineID, texturePath, scriptPath, [app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+            if(object->scriptFile != "nil") {
+                push_shared_ptr_to_lua(app->L, object);
+                lua_setglobal(app->L, "object");
 
-            push_shared_ptr_to_lua(app->L, object);
-            lua_setglobal(app->L, "object");
+                push_raw_ptr_to_lua(app->L, &ubo);
+                lua_setglobal(app->L, "ubo");
 
-            push_raw_ptr_to_lua(app->L, &ubo);
-            lua_setglobal(app->L, "ubo");
-
-            if (luaL_dostring(app->L, object->script.c_str()) != LUA_OK) {
-                const char* error = lua_tostring(app->L, -1);
-                lua_pop(app->L, 1);
-                throw std::runtime_error("BlahajEngine [LUA]: " + std::string(error));
-            }
-
-            lua_getglobal(app->L, "Update");
-
-            if (lua_isfunction(app->L, -1)) {
-                if (lua_pcall(app->L, 0, 0, 0) != LUA_OK) {
+                if (luaL_dostring(app->L, object->script.c_str()) != LUA_OK) {
                     const char* error = lua_tostring(app->L, -1);
                     lua_pop(app->L, 1);
                     throw std::runtime_error("BlahajEngine [LUA]: " + std::string(error));
                 }
-            } else {
-                throw std::runtime_error("BlahajEngine [LUA]: Could not find function Update() inside " + object->scriptFile);
+
+                lua_getglobal(app->L, "Update");
+
+                if (lua_isfunction(app->L, -1)) {
+                    if (lua_pcall(app->L, 0, 0, 0) != LUA_OK) {
+                        const char* error = lua_tostring(app->L, -1);
+                        lua_pop(app->L, 1);
+                        throw std::runtime_error("BlahajEngine [LUA]: " + std::string(error));
+                    }
+                } else {
+                    throw std::runtime_error("BlahajEngine [LUA]: Could not find function Update() inside " + object->scriptFile);
+                }
             }
 
             glm::mat4 model = glm::mat4(1.0f);
@@ -1742,6 +1767,10 @@ public:
             float top = height / 2.0f;
             float nearPlane = 0.1f;
             float farPlane = 10.0f;
+
+            app->cam.aabbMin = {left, bottom};
+            app->cam.aabbMax = {right, top};
+
 
             ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
             ubo.proj[1][1] *= -1;
@@ -1819,6 +1848,7 @@ public:
     }
 
     void lua_bindAllEngineFuncs() {
+        lua_register(L, "addPipeline", lua_addPipeline);
         lua_register(L, "addGameObject", lua_addGameObject);
         lua_register(L, "deleteGameObject", lua_deleteGameObject);
         lua_register(L, "moveGameObject", lua_moveGameObject);
@@ -1829,28 +1859,27 @@ public:
         lua_register(L, "setTargetFPS", lua_setTargetFPS);
     }
 
-    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, std::string vertShaderPath, std::string fragShaderPath, std::string imagePath, std::string scriptFile, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
+    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, int pipelineID, std::string imagePath, std::string scriptFile, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
         auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos, rot, scale, vertices, indices);
 
         object->scriptFile = scriptFile;
+        object->pipelineID = pipelineID;
 
-        std::ifstream file(scriptFile);
-        if (!file) {
-            throw std::runtime_error("BlahajEngine [LUA]: Could not find script file " + object->scriptFile);
+        if(scriptFile != "nil") {
+            std::ifstream file(scriptFile);
+            if (!file) {
+                throw std::runtime_error("BlahajEngine [LUA]: Could not find script file " + object->scriptFile);
+            }
+
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+
+            object->script = buffer.str();
+
+            file.close();
         }
 
-        std::stringstream buffer;
-        buffer << file.rdbuf();
-
-        object->script = buffer.str();
-
-        file.close();
-
         object->setUpdateFunction(updateFunction);
-
-        createDescriptorSetLayout(object);
-
-        createGraphicsPipeline(object, vertShaderPath, fragShaderPath);
 
         createUniformBuffers(object);
 
@@ -1873,9 +1902,6 @@ public:
     void deleteGameObject(std::shared_ptr<gameObject> gameObjectPtr) {
             vkDeviceWaitIdle(device);
 
-            vkDestroyPipeline(device, gameObjectPtr->graphicsPipeline, nullptr);
-            vkDestroyPipelineLayout(device, gameObjectPtr->pipelineLayout, nullptr);
-
             for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
                 vkDestroyBuffer(device, gameObjectPtr->uniformBuffers[i], nullptr);
                 vkFreeMemory(device, gameObjectPtr->uniformBuffersMemory[i], nullptr);
@@ -1888,8 +1914,6 @@ public:
 
             vkDestroyImage(device, gameObjectPtr->textureImage, nullptr);
             vkFreeMemory(device, gameObjectPtr->textureImageMemory, nullptr);
-
-            vkDestroyDescriptorSetLayout(device, gameObjectPtr->descriptorSetLayout, nullptr);
 
             vkDestroyBuffer(device, gameObjectPtr->indexBuffer, nullptr);
             vkFreeMemory(device, gameObjectPtr->indexBufferMemory, nullptr);
