@@ -69,7 +69,7 @@ public:
 private:
     const std::string engineName = "Blahaj Engine";
 
-    const uint MAX_FRAMES_IN_FLIGHT = 2;
+    const uint32_t MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t currentFrame = 0;
 
     VkInstance instance;
@@ -502,7 +502,7 @@ private:
             }
         }
 
-        return VK_PRESENT_MODE_FIFO_KHR;
+        return VK_PRESENT_MODE_IMMEDIATE_KHR;
     }
 
     VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities) {
@@ -674,7 +674,7 @@ private:
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
 
         if (!file.is_open()) {
-            throw std::runtime_error("BlahajEngine: Failed to open file!");
+            throw std::runtime_error("BlahajEngine: Failed to open file: " + filename);
         }
 
         size_t fileSize = (size_t) file.tellg();
@@ -974,7 +974,7 @@ private:
         VkDeviceSize imageSize = texWidth * texHeight * 4;
 
         if (!pixels) {
-            throw std::runtime_error("STBImage: Failed to load texture image!");
+            throw std::runtime_error("STBImage: Failed to load texture image: " + imagePath);
         }
 
         VkBuffer stagingBuffer;
@@ -1121,7 +1121,6 @@ private:
 
         vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
     }
-
 
     void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
         VkCommandBuffer commandBuffer = beginSingleTimeCommands();
@@ -1421,10 +1420,9 @@ private:
                 vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
 
                 throw std::runtime_error("VULKAN: Failed to create synchronization objects for a frame!");
-                }
+            }
         }
     }
-
 
     void initVulkan() {
         createInstance();
@@ -1490,7 +1488,7 @@ private:
 
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
-        vkResetCommandBuffer(commandBuffers[currentFrame], /*VkCommandBufferResetFlagBits*/ 0);
+        vkResetCommandBuffer(commandBuffers[currentFrame], 0);
         recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
         VkSubmitInfo submitInfo{};
@@ -1679,24 +1677,25 @@ private:
         lua_pushnil(L);
         lua_setglobal(L, "object");
 
-        lua_getglobal(L, "collectgarbage");  // Get the 'collectgarbage' function
-        lua_pushstring(L, "collect");        // Push the argument 'collect'
-        if (lua_pcall(L, 1, 0, 0) != LUA_OK) {  // Call collectgarbage("collect")
-            std::cerr << "Error running collectgarbage: " << lua_tostring(L, -1) << std::endl;
+        lua_getglobal(L, "collectgarbage");
+        lua_pushstring(L, "collect");
+        if (lua_pcall(L, 1, 0, 0) != LUA_OK) {
+            std::runtime_error("blahajEngine [LUA]: Error running collectgarbage: " + std::string(lua_tostring(L, -1)));
         }
+
+        lua_close(L);
     }
 public:
     static int lua_addPipeline(lua_State *L) {
         auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
         int pipelineID = lua_tonumber(L, 2);
-        // const char* vertexShader = lua_tostring(L, 3);
-        // const char* fragmentShader = lua_tostring(L, 4);
+        const char* vertexShader = lua_tostring(L, 3);
+        const char* fragmentShader = lua_tostring(L, 4);
 
-        app->createGraphicsPipeline(pipelineID, "spv/debug.vert.spv", "spv/debug.frag.spv");
+        app->createGraphicsPipeline(pipelineID, vertexShader, fragmentShader);
 
         return 0;
     }
-
 
     static int lua_addGameObject(lua_State *L) {
         auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
