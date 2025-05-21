@@ -1,5 +1,5 @@
 # Compiler and linker flags
-CFLAGS = -std=c++17 -O2 -Wall
+CFLAGS = -std=c++17 -g -O0 -Wall
 LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi -llua -lm
 
 # Source and object directories

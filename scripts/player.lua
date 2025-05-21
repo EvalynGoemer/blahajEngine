@@ -31,7 +31,7 @@ function Update()
         NotFirstRun = true
     end
 
-    local speed = 0.01
+    local speed = 1
     local movementStep = 0.0005
     local velocityX = 0
     local velocityY = 0
@@ -51,7 +51,7 @@ function Update()
 
     velocityX, velocityY = normalizeVelocity(velocityX, velocityY)
 
-    X = X + velocityX * speed
+    X = X + velocityX * speed * delta_time
     moveGameObject(object, X, Y, 2)
 
     if AABB2D_intersectsAll(engine, object) then
@@ -61,7 +61,7 @@ function Update()
         end
     end
 
-    Y = Y + velocityY * speed
+    Y = Y + velocityY * speed * delta_time
     moveGameObject(object, X, Y, 2)
 
     if AABB2D_intersectsAll(engine, object) then

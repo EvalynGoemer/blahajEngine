@@ -1,4 +1,5 @@
-#define NDEBUG
+#include <vulkan/vulkan_core.h>
+// #define NDEBUG
 
 #include "engine/aabb.h"
 #include "engine/engine_structs.h"
@@ -968,34 +969,93 @@ private:
         endSingleTimeCommands(commandBuffer);
     }
 
-    void createTextureImage(std::shared_ptr<blahajEngine::gameObject> object, std::string imagePath) {
-        int texWidth, texHeight, texChannels;
-        stbi_uc* pixels = stbi_load(imagePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-        VkDeviceSize imageSize = texWidth * texHeight * 4;
+    struct CachedImage {
+        VkImage textureImage;
+        VkDeviceMemory textureImageMemory;
+        VkImageView textureImageView;
+        VkSampler textureSampler;
+    };
 
-        if (!pixels) {
-            throw std::runtime_error("STBImage: Failed to load texture image: " + imagePath);
+    std::map<std::string, CachedImage> imageCache;
+
+    void createTextureImage(std::shared_ptr<blahajEngine::gameObject> object, std::string imagePath) {
+        auto it = imageCache.find(imagePath);
+        if (it != imageCache.end()) {
+            CachedImage image = it->second;
+
+            object->textureImage = image.textureImage;
+            object->textureImageMemory = image.textureImageMemory;
+            object->textureImageView = image.textureImageView;
+            object->textureSampler = image.textureSampler;
+
+            std::cout << "Cache Hit!" << std::endl;
+        } else {
+            CachedImage image;
+
+            int texWidth, texHeight, texChannels;
+            stbi_uc* pixels = stbi_load(imagePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+            VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+            if (!pixels) {
+                throw std::runtime_error("STBImage: Failed to load texture image: " + imagePath);
+            }
+
+            VkBuffer stagingBuffer;
+            VkDeviceMemory stagingBufferMemory;
+            createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+            void* data;
+            vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
+            memcpy(data, pixels, static_cast<size_t>(imageSize));
+            vkUnmapMemory(device, stagingBufferMemory);
+
+            stbi_image_free(pixels);
+
+            createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image.textureImage, image.textureImageMemory);
+
+            transitionImageLayout(image.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+            copyBufferToImage(stagingBuffer, image.textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+            transitionImageLayout(image.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+            vkDestroyBuffer(device, stagingBuffer, nullptr);
+            vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+            image.textureImageView = createImageView(image.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+
+            VkSamplerCreateInfo samplerInfo{};
+            samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+            samplerInfo.magFilter = VK_FILTER_NEAREST;
+            samplerInfo.minFilter = VK_FILTER_NEAREST;
+            samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+            samplerInfo.anisotropyEnable = VK_FALSE;
+
+            VkPhysicalDeviceProperties properties{};
+            vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+            samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
+
+            samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+            samplerInfo.unnormalizedCoordinates = VK_FALSE;
+            samplerInfo.compareEnable = VK_FALSE;
+            samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+            samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+            samplerInfo.mipLodBias = 0.0f;
+            samplerInfo.minLod = 0.0f;
+            samplerInfo.maxLod = 0.0f;
+
+            if (vkCreateSampler(device, &samplerInfo, nullptr, &image.textureSampler) != VK_SUCCESS) {
+                throw std::runtime_error("VULKAN: Failed to create texture sampler!");
+            }
+
+            object->textureImage = image.textureImage;
+            object->textureImageMemory = image.textureImageMemory;
+            object->textureImageView = image.textureImageView;
+            object->textureSampler = image.textureSampler;
+
+            imageCache.insert({imagePath, image});
         }
 
-        VkBuffer stagingBuffer;
-        VkDeviceMemory stagingBufferMemory;
-        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-        void* data;
-        vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-        memcpy(data, pixels, static_cast<size_t>(imageSize));
-        vkUnmapMemory(device, stagingBufferMemory);
-
-        stbi_image_free(pixels);
-
-        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, object->textureImage, object->textureImageMemory);
-
-        transitionImageLayout(object->textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        copyBufferToImage(stagingBuffer, object->textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-        transitionImageLayout(object->textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-        vkDestroyBuffer(device, stagingBuffer, nullptr);
-        vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
     void createTextureImageView(std::shared_ptr<blahajEngine::gameObject> object) {
@@ -1254,7 +1314,9 @@ private:
 
         object->runUpdateFunction(object, ubo);
 
-        memcpy(object->uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+        if(AABB2d::intersects(object, cam)) {
+            memcpy(object->uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+        }
     }
 
     void createDescriptorPool(std::shared_ptr<blahajEngine::gameObject> object) {
@@ -1543,6 +1605,10 @@ private:
             auto current_time = std::chrono::high_resolution_clock::now();
             std::chrono::duration<float> delta_time = current_time - last_time;
 
+            last_time = current_time;
+            lua_pushnumber(L, delta_time.count());
+            lua_setglobal(L, "delta_time");
+
             if (delta_time.count() < frame_duration) {
                 std::this_thread::sleep_for(std::chrono::nanoseconds(1));
                 continue;
@@ -1563,8 +1629,6 @@ private:
                     }),
                 gameObjects.end()
             );
-
-            last_time = current_time;
         }
 
         vkDeviceWaitIdle(device);
@@ -1883,8 +1947,6 @@ public:
         createUniformBuffers(object);
 
         createTextureImage(object, imagePath);
-        createTextureImageView(object);
-        createTextureSampler(object);
 
         createDescriptorPool(object);
         createDescriptorSets(object);

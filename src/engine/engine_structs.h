@@ -58,16 +58,9 @@ namespace blahajEngine {
     };
 
     struct UniformBufferObject {
-        AlignedInt tileMap[24*24];
         alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 view;
         alignas(16) glm::mat4 proj;
-        int textureAtlasWidth;
-        int textureAtlasHeight;
-        int tileWidth;
-        int tileHeight;
-        int tileMapWidth;
-        int tileMapHeight;
     };
 
     enum objectTypes {

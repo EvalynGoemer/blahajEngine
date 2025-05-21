@@ -6,16 +6,9 @@ struct AlignedInt {
 };
 
 layout(binding = 0) uniform UniformBufferObject {
-    AlignedInt tileMap[24*24];
     mat4 model;
     mat4 view;
     mat4 proj;
-    int textureAtlasWidth;
-    int textureAtlasHeight;
-    int tileWidth;
-    int tileHeight;
-    int tileMapWidth;
-    int tileMapHeight;
 } ubo;
 
 
