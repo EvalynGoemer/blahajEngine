@@ -1,5 +1,4 @@
-#include <vulkan/vulkan_core.h>
-// #define NDEBUG
+#define NDEBUG
 
 #include "engine/aabb.h"
 #include "engine/engine_structs.h"
@@ -67,6 +66,22 @@ public:
     std::map<int, VkPipelineLayout> pipelineLayouts;
     std::map<int, VkDescriptorSetLayout> descriptorSetLayouts;
 
+    std::map<int, VkDescriptorPool> descriptorPools;
+    std::map<int, std::vector<VkDescriptorSet>> descriptorSets;
+
+    std::map<int, std::vector<VkBuffer>> ssbo;
+    std::map<int, std::vector<VkDeviceMemory>> ssboMemory;
+    std::map<int, std::vector<void*>> ssboMemoryMapped;
+    VkDeviceSize ssboSize = sizeof(ssboStruct);
+
+    std::map<int, VkImage> textureImage;
+    std::map<int, VkDeviceMemory> textureImageMemory;
+    std::map<int, VkImageView> textureImageView;
+    std::map<int, VkSampler> textureSampler;
+
+    int nextId = 0;
+    std::vector<int> deletedIds;
+
 private:
     const std::string engineName = "Blahaj Engine";
 
@@ -113,7 +128,8 @@ private:
     };
 
     const std::vector<const char*> deviceExtensions = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME
     };
 
 
@@ -212,7 +228,7 @@ private:
         appInfo.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
         appInfo.pEngineName = engineName.c_str();
         appInfo.engineVersion = VK_MAKE_VERSION(1, 0, 0);
-        appInfo.apiVersion = VK_API_VERSION_1_0;
+        appInfo.apiVersion = VK_API_VERSION_1_2;
 
         VkInstanceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
@@ -425,6 +441,15 @@ private:
             queueCreateInfos.push_back(queueCreateInfo);
         }
 
+        VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures{};
+        indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+        indexingFeatures.runtimeDescriptorArray = VK_TRUE;
+        indexingFeatures.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+        indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+        indexingFeatures.descriptorBindingVariableDescriptorCount = VK_TRUE;
+        indexingFeatures.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+        indexingFeatures.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
+
         VkPhysicalDeviceFeatures deviceFeatures{};
         deviceFeatures.samplerAnisotropy = VK_TRUE;
 
@@ -435,6 +460,7 @@ private:
         createInfo.pQueueCreateInfos = queueCreateInfos.data();
 
         createInfo.pEnabledFeatures = &deviceFeatures;
+        createInfo.pNext = &indexingFeatures;
 
         createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
         createInfo.ppEnabledExtensionNames = deviceExtensions.data();
@@ -646,23 +672,34 @@ private:
     }
 
     void createDescriptorSetLayout(int id) {
-        VkDescriptorSetLayoutBinding uboLayoutBinding{};
-        uboLayoutBinding.binding = 0;
-        uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        uboLayoutBinding.descriptorCount = 1;
-        uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-        uboLayoutBinding.pImmutableSamplers = nullptr;
+        VkDescriptorSetLayoutBinding ssboLayoutBinding{};
+        ssboLayoutBinding.binding = 0;
+        ssboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        ssboLayoutBinding.descriptorCount = 1;
+        ssboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        ssboLayoutBinding.pImmutableSamplers = nullptr;
 
         VkDescriptorSetLayoutBinding samplerLayoutBinding{};
         samplerLayoutBinding.binding = 1;
-        samplerLayoutBinding.descriptorCount = 1;
+        samplerLayoutBinding.descriptorCount = 512;
         samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         samplerLayoutBinding.pImmutableSamplers = nullptr;
         samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
+        VkDescriptorBindingFlags bindingFlags[] = {
+            0,
+            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+        };
+
+        VkDescriptorSetLayoutBindingFlagsCreateInfo extendedInfo{};
+        extendedInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+        extendedInfo.bindingCount = 2;
+        extendedInfo.pBindingFlags = bindingFlags;
+
+        std::array<VkDescriptorSetLayoutBinding, 2> bindings = {ssboLayoutBinding, samplerLayoutBinding};
         VkDescriptorSetLayoutCreateInfo layoutInfo{};
         layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.pNext = &extendedInfo;
         layoutInfo.bindingCount = static_cast<uint32_t>(bindings.size());
         layoutInfo.pBindings = bindings.data();
 
@@ -705,6 +742,11 @@ private:
     std::vector<VkDynamicState> dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
         VK_DYNAMIC_STATE_SCISSOR
+    };
+
+    struct pushConstantLayout {
+        int id;
+        int texture_id;
     };
 
     void createGraphicsPipeline(int id, std::string vertShaderPath, std::string fragShaderPath) {
@@ -804,10 +846,18 @@ private:
         dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
         dynamicState.pDynamicStates = dynamicStates.data();
 
+        VkPushConstantRange pushConstantRange{};
+        pushConstantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+        pushConstantRange.offset = 0;
+        pushConstantRange.size = sizeof(pushConstantLayout);
+
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipelineLayoutInfo.setLayoutCount = 1;
         pipelineLayoutInfo.pSetLayouts = &descriptorSetLayouts[id];
+        pipelineLayoutInfo.pushConstantRangeCount = 1;
+        pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
+
 
         if (vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &pipelineLayouts[id]) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create pipeline layout!");
@@ -836,6 +886,10 @@ private:
 
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
+
+        createSSBO(id);
+        createDescriptorPool(id);
+        createDescriptorSets(id);
     }
 
     void createFramebuffers() {
@@ -969,100 +1023,37 @@ private:
         endSingleTimeCommands(commandBuffer);
     }
 
-    struct CachedImage {
-        VkImage textureImage;
-        VkDeviceMemory textureImageMemory;
-        VkImageView textureImageView;
-        VkSampler textureSampler;
-    };
+    void createTextureImage(int id, std::string imagePath) {
+        int texWidth, texHeight, texChannels;
+        stbi_uc* pixels = stbi_load(imagePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+        VkDeviceSize imageSize = texWidth * texHeight * 4;
 
-    std::map<std::string, CachedImage> imageCache;
-
-    void createTextureImage(std::shared_ptr<blahajEngine::gameObject> object, std::string imagePath) {
-        auto it = imageCache.find(imagePath);
-        if (it != imageCache.end()) {
-            CachedImage image = it->second;
-
-            object->textureImage = image.textureImage;
-            object->textureImageMemory = image.textureImageMemory;
-            object->textureImageView = image.textureImageView;
-            object->textureSampler = image.textureSampler;
-
-            std::cout << "Cache Hit!" << std::endl;
-        } else {
-            CachedImage image;
-
-            int texWidth, texHeight, texChannels;
-            stbi_uc* pixels = stbi_load(imagePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-            VkDeviceSize imageSize = texWidth * texHeight * 4;
-
-            if (!pixels) {
-                throw std::runtime_error("STBImage: Failed to load texture image: " + imagePath);
-            }
-
-            VkBuffer stagingBuffer;
-            VkDeviceMemory stagingBufferMemory;
-            createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
-
-            void* data;
-            vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
-            memcpy(data, pixels, static_cast<size_t>(imageSize));
-            vkUnmapMemory(device, stagingBufferMemory);
-
-            stbi_image_free(pixels);
-
-            createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, image.textureImage, image.textureImageMemory);
-
-            transitionImageLayout(image.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-            copyBufferToImage(stagingBuffer, image.textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
-            transitionImageLayout(image.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-            vkDestroyBuffer(device, stagingBuffer, nullptr);
-            vkFreeMemory(device, stagingBufferMemory, nullptr);
-
-            image.textureImageView = createImageView(image.textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
-
-            VkSamplerCreateInfo samplerInfo{};
-            samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-            samplerInfo.magFilter = VK_FILTER_NEAREST;
-            samplerInfo.minFilter = VK_FILTER_NEAREST;
-            samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-            samplerInfo.anisotropyEnable = VK_FALSE;
-
-            VkPhysicalDeviceProperties properties{};
-            vkGetPhysicalDeviceProperties(physicalDevice, &properties);
-            samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy;
-
-            samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-            samplerInfo.unnormalizedCoordinates = VK_FALSE;
-            samplerInfo.compareEnable = VK_FALSE;
-            samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-            samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-            samplerInfo.mipLodBias = 0.0f;
-            samplerInfo.minLod = 0.0f;
-            samplerInfo.maxLod = 0.0f;
-
-            if (vkCreateSampler(device, &samplerInfo, nullptr, &image.textureSampler) != VK_SUCCESS) {
-                throw std::runtime_error("VULKAN: Failed to create texture sampler!");
-            }
-
-            object->textureImage = image.textureImage;
-            object->textureImageMemory = image.textureImageMemory;
-            object->textureImageView = image.textureImageView;
-            object->textureSampler = image.textureSampler;
-
-            imageCache.insert({imagePath, image});
+        if (!pixels) {
+            throw std::runtime_error("STBImage: Failed to load texture image: " + imagePath);
         }
 
-    }
+        VkBuffer stagingBuffer;
+        VkDeviceMemory stagingBufferMemory;
+        createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
-    void createTextureImageView(std::shared_ptr<blahajEngine::gameObject> object) {
-        object->textureImageView = createImageView(object->textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
-    }
+        void* data;
+        vkMapMemory(device, stagingBufferMemory, 0, imageSize, 0, &data);
+        memcpy(data, pixels, static_cast<size_t>(imageSize));
+        vkUnmapMemory(device, stagingBufferMemory);
 
-    void createTextureSampler(std::shared_ptr<blahajEngine::gameObject> object) {
+        stbi_image_free(pixels);
+
+        createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, textureImage[id], textureImageMemory[id]);
+
+        transitionImageLayout(textureImage[id], VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        copyBufferToImage(stagingBuffer, textureImage[id], static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+        transitionImageLayout(textureImage[id], VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        vkDestroyBuffer(device, stagingBuffer, nullptr);
+        vkFreeMemory(device, stagingBufferMemory, nullptr);
+
+        textureImageView[id] = createImageView(textureImage[id], VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+
         VkSamplerCreateInfo samplerInfo{};
         samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.magFilter = VK_FILTER_NEAREST;
@@ -1085,8 +1076,28 @@ private:
         samplerInfo.minLod = 0.0f;
         samplerInfo.maxLod = 0.0f;
 
-        if (vkCreateSampler(device, &samplerInfo, nullptr, &object->textureSampler) != VK_SUCCESS) {
+        if (vkCreateSampler(device, &samplerInfo, nullptr, &textureSampler[id]) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create texture sampler!");
+        }
+
+        VkDescriptorImageInfo imageInfo{};
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = textureImageView[id];
+        imageInfo.sampler = textureSampler[id];
+
+        for (const auto& [key, vec] : descriptorSets) {
+            for (VkDescriptorSet val : vec) {
+                VkWriteDescriptorSet writeDescriptor{};
+                writeDescriptor.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                writeDescriptor.dstSet = val;
+                writeDescriptor.dstBinding = 1;
+                writeDescriptor.dstArrayElement = id;
+                writeDescriptor.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                writeDescriptor.descriptorCount = 1;
+                writeDescriptor.pImageInfo = &imageInfo;
+
+                vkUpdateDescriptorSets(device, 1, &writeDescriptor, 0, nullptr);
+            }
         }
     }
 
@@ -1295,85 +1306,76 @@ private:
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
-    void createUniformBuffers(std::shared_ptr<blahajEngine::gameObject> object) {
-        VkDeviceSize bufferSize = sizeof(UniformBufferObject);
-
-        object->uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
-        object->uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
-        object->uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+    void createSSBO(int id) {
+        ssbo[id].resize(MAX_FRAMES_IN_FLIGHT);
+        ssboMemory[id].resize(MAX_FRAMES_IN_FLIGHT);
+        ssboMemoryMapped[id].resize(MAX_FRAMES_IN_FLIGHT);
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-            createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, object->uniformBuffers[i], object->uniformBuffersMemory[i]);
+            createBuffer(ssboSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, ssbo[id][i], ssboMemory[id][i]);
 
-            vkMapMemory(device, object->uniformBuffersMemory[i], 0, bufferSize, 0, &object->uniformBuffersMapped[i]);
+            vkMapMemory(device, ssboMemory[id][i], 0, ssboSize, 0, &ssboMemoryMapped[id][i]);
         }
     }
 
-    void updateUniformBuffer(std::shared_ptr<blahajEngine::gameObject> object, uint32_t currentImage) {
-        UniformBufferObject ubo{};
-
-        object->runUpdateFunction(object, ubo);
-
-        if(AABB2d::intersects(object, cam)) {
-            memcpy(object->uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
-        }
-    }
-
-    void createDescriptorPool(std::shared_ptr<blahajEngine::gameObject> object) {
+    void createDescriptorPool(int pipelineID) {
         std::array<VkDescriptorPoolSize, 2> poolSizes{};
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        poolSizes[0].descriptorCount = 1 * MAX_FRAMES_IN_FLIGHT;
         poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        poolSizes[1].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolSizes[1].descriptorCount = 512 * MAX_FRAMES_IN_FLIGHT;
 
         VkDescriptorPoolCreateInfo poolInfo{};
         poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
         poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
         poolInfo.pPoolSizes = poolSizes.data();
-        poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+        poolInfo.maxSets = MAX_FRAMES_IN_FLIGHT;
 
-        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &object->descriptorPool) != VK_SUCCESS) {
+        if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPools[pipelineID]) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to create descriptor pool!");
         }
     }
 
-    void createDescriptorSets(std::shared_ptr<blahajEngine::gameObject> object) {
-        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayouts[object->pipelineID]);
+    void createDescriptorSets(int id) {
+        std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayouts[id]);
         VkDescriptorSetAllocateInfo allocInfo{};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = object->descriptorPool;
+        allocInfo.descriptorPool = descriptorPools[id];
         allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
         allocInfo.pSetLayouts = layouts.data();
 
 
-        object->descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
-        if (vkAllocateDescriptorSets(device, &allocInfo, object->descriptorSets.data()) != VK_SUCCESS) {
+        descriptorSets[id].resize(MAX_FRAMES_IN_FLIGHT);
+        if (vkAllocateDescriptorSets(device, &allocInfo, descriptorSets[id].data()) != VK_SUCCESS) {
             throw std::runtime_error("VULKAN: Failed to allocate descriptor sets!");
         }
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
             VkDescriptorBufferInfo bufferInfo{};
-            bufferInfo.buffer = object->uniformBuffers[i];
+            bufferInfo.buffer = ssbo[id][i];
             bufferInfo.offset = 0;
-            bufferInfo.range = sizeof(UniformBufferObject);
-
-            VkDescriptorImageInfo imageInfo{};
-            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            imageInfo.imageView = object->textureImageView;
-            imageInfo.sampler = object->textureSampler;
+            bufferInfo.range = sizeof(ssboStruct);
 
             std::array<VkWriteDescriptorSet, 2> descriptorWrites{};
 
             descriptorWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[0].dstSet = object->descriptorSets[i];
+            descriptorWrites[0].dstSet = descriptorSets[id][i];
             descriptorWrites[0].dstBinding = 0;
             descriptorWrites[0].dstArrayElement = 0;
-            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            descriptorWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             descriptorWrites[0].descriptorCount = 1;
             descriptorWrites[0].pBufferInfo = &bufferInfo;
 
+            createTextureImage(1, "assets/null.png");
+
+            VkDescriptorImageInfo imageInfo{};
+            imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            imageInfo.imageView = textureImageView[1];
+            imageInfo.sampler = textureSampler[1];
+
             descriptorWrites[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[1].dstSet = object->descriptorSets[i];
+            descriptorWrites[1].dstSet = descriptorSets[id][i];
             descriptorWrites[1].dstBinding = 1;
             descriptorWrites[1].dstArrayElement = 0;
             descriptorWrites[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -1452,7 +1454,18 @@ private:
 
                 vkCmdBindIndexBuffer(commandBuffer, gameObjectPtr->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
-                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts[gameObjectPtr->pipelineID], 0, 1, &gameObjectPtr->descriptorSets[currentFrame], 0, nullptr);
+                vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts[gameObjectPtr->pipelineID], 0, 1, &descriptorSets[gameObjectPtr->pipelineID][currentFrame], 0, nullptr);
+
+                pushConstantLayout pushConstants{gameObjectPtr->id, gameObjectPtr->texture_id};
+
+                vkCmdPushConstants(
+                    commandBuffer,
+                    pipelineLayouts[gameObjectPtr->pipelineID],
+                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                    0,
+                    sizeof(pushConstantLayout),
+                                   &pushConstants
+                );
 
                 vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(gameObjectPtr->indices.size()), 1, 0, 0, 0);
             }
@@ -1543,10 +1556,25 @@ private:
             throw std::runtime_error("VULKAN: Failed to acquire swap chain image!");
         }
 
+
+        ssboStruct *ssboToSend = (ssboStruct *)malloc(sizeof(ssboStruct));
+
         for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
             auto& gameObjectPtr = *it;
-            updateUniformBuffer(gameObjectPtr, currentFrame);
+            UniformBufferObject ubo{};
+
+            gameObjectPtr->runUpdateFunction(gameObjectPtr, ubo);
+
+
+            ssboToSend->UBOs[gameObjectPtr->id] = ubo;
         }
+
+        for (const auto& [key, value] : pipelines) {
+            memcpy(ssboMemoryMapped[key][currentFrame], ssboToSend, ssboSize);
+        }
+
+        free(ssboToSend);
+
 
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
@@ -1680,24 +1708,6 @@ private:
 
         vkDestroyRenderPass(device, renderPass, nullptr);
 
-        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
-            auto& gameObjectPtr = *it;
-
-            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-                vkDestroyBuffer(device, gameObjectPtr->uniformBuffers[i], nullptr);
-                vkFreeMemory(device, gameObjectPtr->uniformBuffersMemory[i], nullptr);
-            }
-
-            vkDestroyDescriptorPool(device, gameObjectPtr->descriptorPool, nullptr);
-
-
-            vkDestroySampler(device, gameObjectPtr->textureSampler, nullptr);
-            vkDestroyImageView(device, gameObjectPtr->textureImageView, nullptr);
-
-            vkDestroyImage(device, gameObjectPtr->textureImage, nullptr);
-            vkFreeMemory(device, gameObjectPtr->textureImageMemory, nullptr);
-        }
-
         for (auto it = descriptorSetLayouts.begin(); it != descriptorSetLayouts.end(); ++it) {
             vkDestroyDescriptorSetLayout(device, it->second, nullptr);
         }
@@ -1761,6 +1771,16 @@ public:
         return 0;
     }
 
+    static int lua_addTexture(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+        int textureID = lua_tonumber(L, 2);
+        const char* texture = lua_tostring(L, 3);
+
+        app->createTextureImage(textureID, texture);
+
+        return 0;
+    }
+
     static int lua_addGameObject(lua_State *L) {
         auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
 
@@ -1780,13 +1800,22 @@ public:
         };
 
         int pipelineID = lua_tointeger(L, 9);
-        const char* texturePath = lua_tostring(L, 10);
+        int textureID = lua_tointeger(L, 10);
         const char* scriptPath = "nil";
         if (lua_isstring(L, 11)) {
             scriptPath = lua_tostring(L, 11);
         }
 
-        app->addGameObject(-1, pos, rot, scale, vertices, indices, pipelineID, texturePath, scriptPath, [app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        int id;
+        if (!app->deletedIds.empty()) {
+            id = app->deletedIds.back();
+            app->deletedIds.pop_back();
+        } else {
+            id = app->nextId + 1;
+            app->nextId++;
+        }
+
+        app->addGameObject(id, pos, rot, scale, vertices, indices, pipelineID, textureID, scriptPath, [app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             if(object->scriptFile != "nil") {
                 push_shared_ptr_to_lua(app->L, object);
                 lua_setglobal(app->L, "object");
@@ -1912,6 +1941,7 @@ public:
 
     void lua_bindAllEngineFuncs() {
         lua_register(L, "addPipeline", lua_addPipeline);
+        lua_register(L, "addTexture", lua_addTexture);
         lua_register(L, "addGameObject", lua_addGameObject);
         lua_register(L, "deleteGameObject", lua_deleteGameObject);
         lua_register(L, "moveGameObject", lua_moveGameObject);
@@ -1922,7 +1952,7 @@ public:
         lua_register(L, "setTargetFPS", lua_setTargetFPS);
     }
 
-    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, int pipelineID, std::string imagePath, std::string scriptFile, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
+    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, int pipelineID, int textureID, std::string scriptFile, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
         auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos, rot, scale, vertices, indices);
 
         object->scriptFile = scriptFile;
@@ -1944,12 +1974,7 @@ public:
 
         object->setUpdateFunction(updateFunction);
 
-        createUniformBuffers(object);
-
-        createTextureImage(object, imagePath);
-
-        createDescriptorPool(object);
-        createDescriptorSets(object);
+        object->texture_id = textureID;
 
         createVertexBuffer(object);
         createIndexBuffer(object);
@@ -1961,20 +1986,9 @@ public:
     }
 
     void deleteGameObject(std::shared_ptr<gameObject> gameObjectPtr) {
+            deletedIds.push_back(gameObjectPtr->id);
+
             vkDeviceWaitIdle(device);
-
-            for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-                vkDestroyBuffer(device, gameObjectPtr->uniformBuffers[i], nullptr);
-                vkFreeMemory(device, gameObjectPtr->uniformBuffersMemory[i], nullptr);
-            }
-
-            vkDestroyDescriptorPool(device, gameObjectPtr->descriptorPool, nullptr);
-
-            vkDestroySampler(device, gameObjectPtr->textureSampler, nullptr);
-            vkDestroyImageView(device, gameObjectPtr->textureImageView, nullptr);
-
-            vkDestroyImage(device, gameObjectPtr->textureImage, nullptr);
-            vkFreeMemory(device, gameObjectPtr->textureImageMemory, nullptr);
 
             vkDestroyBuffer(device, gameObjectPtr->indexBuffer, nullptr);
             vkFreeMemory(device, gameObjectPtr->indexBufferMemory, nullptr);

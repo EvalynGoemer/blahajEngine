@@ -1,15 +1,20 @@
 #version 450
 #extension GL_EXT_scalar_block_layout : enable
 
-struct AlignedInt {
-    int i;
-};
-
-layout(binding = 0) uniform UniformBufferObject {
+struct uboStruct {
     mat4 model;
     mat4 view;
     mat4 proj;
-} ubo;
+};
+
+layout(binding = 0) readonly buffer DataBuffer {
+    uboStruct ubo[64000];
+} ssboData;
+
+layout(push_constant) uniform PushConstants {
+    int id;
+    int texture_id;
+} pushConsts;
 
 
 layout(location = 0) in vec3 inPosition;
@@ -20,7 +25,7 @@ layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 fragTexCoord;
 
 void main() {
-    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(inPosition, 1.0);
+    gl_Position = ssboData.ubo[pushConsts.id].proj * ssboData.ubo[pushConsts.id].view * ssboData.ubo[pushConsts.id].model * vec4(inPosition, 1.0);
     fragColor = inColor;
     fragTexCoord = inTexCoord;
 }

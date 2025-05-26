@@ -63,6 +63,10 @@ namespace blahajEngine {
         alignas(16) glm::mat4 proj;
     };
 
+    struct ssboStruct{
+        UniformBufferObject UBOs[64000];
+    };
+
     enum objectTypes {
         OBJ_TYPE_DEBUG = -1,
         OBJ_TYPE_BACKGROUND = 1
@@ -79,7 +83,8 @@ namespace blahajEngine {
     };
 
     struct gameObject {
-        int objectType;
+        int id;
+        int texture_id;
 
         glm::vec3 pos;
         glm::vec3 rot;
@@ -102,18 +107,6 @@ namespace blahajEngine {
         VkBuffer indexBuffer;
         VkDeviceMemory indexBufferMemory;
 
-        VkImage textureImage;
-        VkImageView textureImageView;
-        VkSampler textureSampler;
-        VkDeviceMemory textureImageMemory;
-
-        VkDescriptorPool descriptorPool;
-        std::vector<VkDescriptorSet> descriptorSets;
-
-        std::vector<VkBuffer> uniformBuffers;
-        std::vector<VkDeviceMemory> uniformBuffersMemory;
-        std::vector<void*> uniformBuffersMapped;
-
         int pipelineID;
 
         std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction;
@@ -128,8 +121,8 @@ namespace blahajEngine {
             }
         }
 
-        gameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
-            this->objectType = objectType;
+        gameObject(int id, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
+            this->id = id;
             this->pos = pos;
             this->rot = rot;
             this->scale = scale;

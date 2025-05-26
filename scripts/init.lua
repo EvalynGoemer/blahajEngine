@@ -5,15 +5,20 @@ function Init()
     -- addPipeline(engine, pipelineID, vertexShader, fragmentShader)
     addPipeline(engine, 1, "spv/debug.vert.spv", "spv/debug.frag.spv")
 
-    -- addGameObject(engine, posX, posY, posZ, rotX, rotY, rotZ, scale, pipelineID, imagePath, scriptPath)
-    addGameObject(engine, 0, 0.6, 0, 0, 0, 0, 0.5, 1, "assets/null.png", nil)
-    addGameObject(engine, 0, -0.3, 0, 0, 0, 0, 0.1, 1, "assets/debug.png", nil)
-    addGameObject(engine, 0.3, 0, 0, 0, 0, 0, 0.1, 1, "assets/debug_alt.png", nil)
-    addGameObject(engine, -0.3, 0, 0, 0, 0, 0, 0.1, 1, "assets/debug_alt.png", nil)
+    -- addTexture(engine, textureID, texture)
+    addTexture(engine, 1, "assets/null.png")
+    addTexture(engine, 2, "assets/debug.png")
+    addTexture(engine, 3, "assets/debug_alt.png")
 
-    addGameObject(engine, 0, 0, 0, 0, 0, 0, 0.1, 1, "assets/null.png", "scripts/player.lua")
+    -- addGameObject(engine, posX, posY, posZ, rotX, rotY, rotZ, scale, pipelineID, textureID, scriptPath)
+    addGameObject(engine, 0, 0.6, 0, 0, 0, 0, 0.5, 1, 1, nil)
+    addGameObject(engine, 0, -0.3, 0, 0, 0, 0, 0.1, 1, 2, nil)
+    addGameObject(engine, 0.3, 0, 0, 0, 0, 0, 0.1, 1, 3, nil)
+    addGameObject(engine, -0.3, 0, 0, 0, 0, 0, 0.1, 1, 3, nil)
 
-    for i = 1, 1000 do
-        addGameObject(engine, 1, 1, 0, 0, 0, 0, 0.1, 1, "assets/null.png", nil)
+    addGameObject(engine, 0, 0, 0, 0, 0, 0, 0.1, 1, 1, "scripts/player.lua")
+
+    for i = 1, 1 do
+        addGameObject(engine, 1, 1, 0, 0, 0, 0, 0.1, 1, 1, nil)
     end
 end
