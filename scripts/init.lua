@@ -18,7 +18,7 @@ function Init()
 
     addGameObject(engine, 0, 0, 0, 0, 0, 0, 0.1, 1, 1, "scripts/player.lua")
 
-    for i = 1, 1 do
+    for i = 1, 10000 do
         addGameObject(engine, 1, 1, 0, 0, 0, 0, 0.1, 1, 1, nil)
     end
 end

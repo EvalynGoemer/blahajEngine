@@ -5,10 +5,11 @@ struct uboStruct {
     mat4 model;
     mat4 view;
     mat4 proj;
+//     vec4 timeAndResolution;
 };
 
 layout(binding = 0) readonly buffer DataBuffer {
-    uboStruct ubo[64000];
+    uboStruct ubo[200000];
 } ssboData;
 
 layout(push_constant) uniform PushConstants {

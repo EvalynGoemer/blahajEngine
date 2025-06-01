@@ -15,6 +15,7 @@
 #include <memory>
 #include <string>
 #include <iostream>
+#include <chrono>
 
 namespace blahajEngine {
     struct Vertex {
@@ -61,10 +62,11 @@ namespace blahajEngine {
         alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 view;
         alignas(16) glm::mat4 proj;
+        // alignas(16) glm::vec4 timeAndResolution;
     };
 
     struct ssboStruct{
-        UniformBufferObject UBOs[64000];
+        UniformBufferObject UBOs[200000];
     };
 
     enum objectTypes {
@@ -86,6 +88,8 @@ namespace blahajEngine {
         int id;
         int texture_id;
 
+        // std::chrono::high_resolution_clock::time_point time;
+
         glm::vec3 pos;
         glm::vec3 rot;
         glm::vec3 scale;
@@ -99,13 +103,7 @@ namespace blahajEngine {
         bool markedForDeletion = false;
         bool deleted = false;
 
-        std::vector<Vertex> vertices;
-        std::vector<uint16_t> indices;
-
-        VkBuffer vertexBuffer;
-        VkDeviceMemory vertexBufferMemory;
-        VkBuffer indexBuffer;
-        VkDeviceMemory indexBufferMemory;
+        int model_id = -1;
 
         int pipelineID;
 
@@ -121,13 +119,14 @@ namespace blahajEngine {
             }
         }
 
-        gameObject(int id, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices) {
+        gameObject(int id, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, int model_id) {
+            // time = std::chrono::high_resolution_clock::now();
+
             this->id = id;
             this->pos = pos;
             this->rot = rot;
             this->scale = scale;
-            this->vertices = vertices;
-            this->indices = indices;
+            this->model_id = model_id;
         }
 
         #ifndef NDEBUG

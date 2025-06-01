@@ -79,6 +79,14 @@ public:
     std::map<int, VkImageView> textureImageView;
     std::map<int, VkSampler> textureSampler;
 
+    std::map<int, std::vector<Vertex>> vertices;
+    std::map<int, std::vector<uint16_t>> indices;
+
+    std::map<int, VkBuffer> vertexBuffer;
+    std::map<int, VkDeviceMemory> vertexBufferMemory;
+    std::map<int, VkBuffer> indexBuffer;
+    std::map<int, VkDeviceMemory> indexBufferMemory;
+
     int nextId = 0;
     std::vector<int> deletedIds;
 
@@ -1266,8 +1274,8 @@ private:
         endSingleTimeCommands(commandBuffer);
     }
 
-    void createVertexBuffer(std::shared_ptr<blahajEngine::gameObject> object) {
-        VkDeviceSize bufferSize = sizeof(object->vertices[0]) * object->vertices.size();
+    void createVertexBuffer(int id, std::vector<Vertex> vertices) {
+        VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -1275,19 +1283,19 @@ private:
 
         void* data;
         vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(data, object->vertices.data(), (size_t) bufferSize);
+        memcpy(data, vertices.data(), (size_t) bufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, object->vertexBuffer, object->vertexBufferMemory);
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer[id], vertexBufferMemory[id]);
 
-        copyBuffer(stagingBuffer, object->vertexBuffer, bufferSize);
+        copyBuffer(stagingBuffer, vertexBuffer[id], bufferSize);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
     }
 
-    void createIndexBuffer(std::shared_ptr<blahajEngine::gameObject> object) {
-        VkDeviceSize bufferSize = sizeof(object->indices[0]) * object->indices.size();
+    void createIndexBuffer(int id, std::vector<uint16_t> indices) {
+        VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
 
         VkBuffer stagingBuffer;
         VkDeviceMemory stagingBufferMemory;
@@ -1295,12 +1303,12 @@ private:
 
         void* data;
         vkMapMemory(device, stagingBufferMemory, 0, bufferSize, 0, &data);
-        memcpy(data, object->indices.data(), (size_t) bufferSize);
+        memcpy(data, indices.data(), (size_t) bufferSize);
         vkUnmapMemory(device, stagingBufferMemory);
 
-        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, object->indexBuffer, object->indexBufferMemory);
+        createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer[id], indexBufferMemory[id]);
 
-        copyBuffer(stagingBuffer, object->indexBuffer, bufferSize);
+        copyBuffer(stagingBuffer, indexBuffer[id], bufferSize);
 
         vkDestroyBuffer(device, stagingBuffer, nullptr);
         vkFreeMemory(device, stagingBufferMemory, nullptr);
@@ -1448,11 +1456,11 @@ private:
                     lastBoundPipelineID = gameObjectPtr->pipelineID;
                 }
 
-                VkBuffer vertexBuffers[] = {gameObjectPtr->vertexBuffer};
+                VkBuffer vertexBuffers[] = {vertexBuffer[gameObjectPtr->model_id]};
                 VkDeviceSize offsets[] = {0};
                 vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-                vkCmdBindIndexBuffer(commandBuffer, gameObjectPtr->indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+                vkCmdBindIndexBuffer(commandBuffer, indexBuffer[gameObjectPtr->model_id], 0, VK_INDEX_TYPE_UINT16);
 
                 vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayouts[gameObjectPtr->pipelineID], 0, 1, &descriptorSets[gameObjectPtr->pipelineID][currentFrame], 0, nullptr);
 
@@ -1467,7 +1475,7 @@ private:
                                    &pushConstants
                 );
 
-                vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(gameObjectPtr->indices.size()), 1, 0, 0, 0);
+                vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices[gameObjectPtr->model_id].size()), 1, 0, 0, 0);
             }
         }
         vkCmdEndRenderPass(commandBuffer);
@@ -1516,6 +1524,23 @@ private:
     }
 
     void initEngine() {
+        std::vector<blahajEngine::Vertex> vertices_quad = {
+            {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+            {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+            {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+            {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
+        };
+
+        std::vector<uint16_t> indices_quad = {
+            0, 1, 2, 2, 3, 0
+        };
+
+        vertices[-1] = vertices_quad;
+        indices[-1] = indices_quad;
+
+        createVertexBuffer(-1, vertices_quad);
+        createIndexBuffer(-1, indices_quad);
+
         L = luaL_newstate();
         luaL_openlibs(L);
 
@@ -1564,7 +1589,6 @@ private:
             UniformBufferObject ubo{};
 
             gameObjectPtr->runUpdateFunction(gameObjectPtr, ubo);
-
 
             ssboToSend->UBOs[gameObjectPtr->id] = ubo;
         }
@@ -1713,15 +1737,15 @@ private:
         }
 
         for (auto it = gameObjects.begin(); it != gameObjects.end(); ) {
-            auto& gameObjectPtr = *it;
-
-            vkDestroyBuffer(device, gameObjectPtr->indexBuffer, nullptr);
-            vkFreeMemory(device, gameObjectPtr->indexBufferMemory, nullptr);
-
-            vkDestroyBuffer(device, gameObjectPtr->vertexBuffer, nullptr);
-            vkFreeMemory(device, gameObjectPtr->vertexBufferMemory, nullptr);
-
             it = gameObjects.erase(it);
+        }
+
+        for (auto it = vertices.begin(); it != vertices.end(); ++it) {
+            vkDestroyBuffer(device, indexBuffer[it->first] , nullptr);
+            vkFreeMemory(device, indexBufferMemory[it->first], nullptr);
+
+            vkDestroyBuffer(device, vertexBuffer[it->first], nullptr);
+            vkFreeMemory(device, vertexBufferMemory[it->first], nullptr);
         }
 
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
@@ -1788,17 +1812,6 @@ public:
         glm::vec3 rot = {lua_tonumber(L, 5), lua_tonumber(L, 6), lua_tonumber(L, 7)};
         glm::vec3 scale = glm::vec3(lua_tonumber(L, 8));
 
-        std::vector<blahajEngine::Vertex> vertices = {
-            {{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-            {{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-            {{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-            {{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-        };
-
-        std::vector<uint16_t> indices = {
-            0, 1, 2, 2, 3, 0
-        };
-
         int pipelineID = lua_tointeger(L, 9);
         int textureID = lua_tointeger(L, 10);
         const char* scriptPath = "nil";
@@ -1815,7 +1828,7 @@ public:
             app->nextId++;
         }
 
-        app->addGameObject(id, pos, rot, scale, vertices, indices, pipelineID, textureID, scriptPath, [app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
+        app->addGameObject(id, pos, rot, scale, pipelineID, textureID, scriptPath, [app] (std::shared_ptr<blahajEngine::gameObject> object, blahajEngine::UniformBufferObject& ubo) {
             if(object->scriptFile != "nil") {
                 push_shared_ptr_to_lua(app->L, object);
                 lua_setglobal(app->L, "object");
@@ -1866,6 +1879,20 @@ public:
 
             ubo.proj = glm::ortho(left, right, bottom, top, nearPlane, farPlane);
             ubo.proj[1][1] *= -1;
+
+            // auto now = std::chrono::high_resolution_clock::now();
+            // std::chrono::duration<double> elapsed = now - object->time;
+            //
+            //
+            // glm::vec2 size = (object->aabbMax - object->aabbMin) * glm::vec2(object->scale.x, object->scale.y);
+            // size = glm::max(size, glm::vec2(1.0f, 1.0f));
+            // float pixelsPerUnit = 100.0f;
+            //
+            // ubo.timeAndResolution.x = size.x * pixelsPerUnit;
+            // ubo.timeAndResolution.y = size.y * pixelsPerUnit;
+            //
+            // ubo.timeAndResolution.z = 1;
+            // ubo.timeAndResolution.w = elapsed.count();
         });
 
         return 0;
@@ -1952,8 +1979,8 @@ public:
         lua_register(L, "setTargetFPS", lua_setTargetFPS);
     }
 
-    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, std::vector<Vertex> vertices, std::vector<uint16_t> indices, int pipelineID, int textureID, std::string scriptFile, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
-        auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos, rot, scale, vertices, indices);
+    void addGameObject(int objectType, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale,int pipelineID, int textureID, std::string scriptFile, std::function<void(std::shared_ptr<blahajEngine::gameObject>& object, UniformBufferObject& ubo)> updateFunction) {
+        auto object = std::make_shared<blahajEngine::gameObject> (objectType, pos, rot, scale, -1);
 
         object->scriptFile = scriptFile;
         object->pipelineID = pipelineID;
@@ -1976,25 +2003,14 @@ public:
 
         object->texture_id = textureID;
 
-        createVertexBuffer(object);
-        createIndexBuffer(object);
-
-        object->aabbMin = AABB2d::getAABBMinFromVertices(vertices);
-        object->aabbMax = AABB2d::getAABBMaxFromVertices(vertices);
+        object->aabbMin = AABB2d::getAABBMinFromVertices(vertices[object->model_id]);
+        object->aabbMax = AABB2d::getAABBMaxFromVertices(vertices[object->model_id]);
 
         gameObjects.push_back(object);
     }
 
     void deleteGameObject(std::shared_ptr<gameObject> gameObjectPtr) {
             deletedIds.push_back(gameObjectPtr->id);
-
-            vkDeviceWaitIdle(device);
-
-            vkDestroyBuffer(device, gameObjectPtr->indexBuffer, nullptr);
-            vkFreeMemory(device, gameObjectPtr->indexBufferMemory, nullptr);
-
-            vkDestroyBuffer(device, gameObjectPtr->vertexBuffer, nullptr);
-            vkFreeMemory(device, gameObjectPtr->vertexBufferMemory, nullptr);
     }
     };
 }
