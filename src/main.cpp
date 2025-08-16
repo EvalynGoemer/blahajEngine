@@ -61,6 +61,7 @@ public:
     VkExtent2D swapChainExtent;
 
     std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjects;
+    std::vector<std::shared_ptr<blahajEngine::gameObject>> gameObjectsStaging;
 
     std::map<int, VkPipeline> pipelines;
     std::map<int, VkPipelineLayout> pipelineLayouts;
@@ -1584,8 +1585,16 @@ private:
 
         ssboStruct *ssboToSend = (ssboStruct *)malloc(sizeof(ssboStruct));
 
-        for (auto it = gameObjects.begin(); it != gameObjects.end(); it++) {
+        if (!gameObjectsStaging.empty()) {
+            gameObjects.insert(gameObjects.end(),
+                               gameObjectsStaging.begin(),
+                               gameObjectsStaging.end());
+            gameObjectsStaging.clear();
+        }
+
+        for (auto it = gameObjects.begin(); it != gameObjects.end(); ++it) {
             auto& gameObjectPtr = *it;
+
             UniformBufferObject ubo{};
 
             gameObjectPtr->runUpdateFunction(gameObjectPtr, ubo);
@@ -1895,7 +1904,19 @@ public:
             // ubo.timeAndResolution.w = elapsed.count();
         });
 
-        return 0;
+        auto it = std::find_if(app->gameObjectsStaging.begin(), app->gameObjectsStaging.end(),
+                               [id](const std::shared_ptr<blahajEngine::gameObject>& obj) {
+                                   return obj->id == id;
+                               });
+
+        if (it != app->gameObjectsStaging.end()) {
+            auto foundObject = *it;
+            push_shared_ptr_to_lua(app->L, foundObject);
+        } else {
+            throw std::runtime_error("BlahajEngine [LUA]: \"Could not find object with an ID that was just used to make an object??????????\"");
+        }
+
+        return 1;
     }
 
     static int lua_deleteGameObject(lua_State *L) {
@@ -2006,7 +2027,7 @@ public:
         object->aabbMin = AABB2d::getAABBMinFromVertices(vertices[object->model_id]);
         object->aabbMax = AABB2d::getAABBMaxFromVertices(vertices[object->model_id]);
 
-        gameObjects.push_back(object);
+        gameObjectsStaging.push_back(object);
     }
 
     void deleteGameObject(std::shared_ptr<gameObject> gameObjectPtr) {

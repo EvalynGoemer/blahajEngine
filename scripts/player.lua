@@ -20,14 +20,9 @@ local function sign(value)
 end
 
 function Update()
-    if getKeyPressed(engine, "P") then
-        deleteGameObject(object)
-    end
-
     if NotFirstRun == nil then
         X = 0
         Y = 0
-
         NotFirstRun = true
     end
 
@@ -49,15 +44,32 @@ function Update()
         velocityX = velocityX + 1
     end
 
+    if getKeyPressed(engine, "K") and OBJMade == nil then
+        OBJ = addGameObject(engine, 1, 1, 0, 0, 0, 0, 0.1, 1, 1, "scripts/testObject.lua")
+        OBJMade = true
+    end
+    if getKeyPressed(engine, "L") and OBJ ~= nil then
+        deleteGameObject(OBJ)
+        OBJMade = nil
+    end
+
     velocityX, velocityY = normalizeVelocity(velocityX, velocityY)
 
+    local maxIterations = 100
     X = X + velocityX * speed * delta_time
     moveGameObject(object, X, Y, 2)
 
     if AABB2D_intersectsAll(engine, object) then
+        local iterations = 0
         while AABB2D_intersectsAll(engine, object) do
             X = X - movementStep * sign(velocityX)
             moveGameObject(object, X, Y, 2)
+            iterations = iterations + 1
+            if iterations >= maxIterations then
+                X, Y = 0, 0
+                moveGameObject(object, X, Y, 2)
+                break
+            end
         end
     end
 
@@ -65,9 +77,16 @@ function Update()
     moveGameObject(object, X, Y, 2)
 
     if AABB2D_intersectsAll(engine, object) then
+        local iterations = 0
         while AABB2D_intersectsAll(engine, object) do
             Y = Y - movementStep * sign(velocityY)
             moveGameObject(object, X, Y, 2)
+            iterations = iterations + 1
+            if iterations >= maxIterations then
+                X, Y = 0, 0
+                moveGameObject(object, X, Y, 2)
+                break
+            end
         end
     end
 
