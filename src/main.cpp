@@ -1033,6 +1033,13 @@ private:
     }
 
     void createTextureImage(int id, std::string imagePath) {
+        if (textureImage[id] != VK_NULL_HANDLE) {
+            vkDestroySampler(device, textureSampler[id], nullptr);
+            vkDestroyImageView(device, textureImageView[id], nullptr);
+            vkDestroyImage(device, textureImage[id], nullptr);
+            vkFreeMemory(device, textureImageMemory[id], nullptr);
+        }
+
         int texWidth, texHeight, texChannels;
         stbi_uc* pixels = stbi_load(imagePath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
         VkDeviceSize imageSize = texWidth * texHeight * 4;
@@ -1960,6 +1967,56 @@ public:
         return 1;
     }
 
+    static int lua_getLeftMousePress(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+
+        if (glfwGetMouseButton(app->window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS) {
+            double xpos, ypos;
+            glfwGetCursorPos(app->window, &xpos, &ypos);
+
+            int width, height;
+            glfwGetWindowSize(app->window, &width, &height);
+
+            float nx = xpos / width;
+            float ny = 1.0f - (ypos / height);
+
+            float worldX = (app->cam.aabbMin.x + nx * (app->cam.aabbMax.x - app->cam.aabbMin.x)) + app->cam.cameraPos.x;
+            float worldY = (app->cam.aabbMin.y + ny * (app->cam.aabbMax.y - app->cam.aabbMin.y)) + app->cam.cameraPos.y;
+
+            lua_pushnumber(L, worldX);
+            lua_pushnumber(L, worldY);
+
+            return 2;
+        }
+
+        return 0;
+    }
+
+    static int lua_getRightMousePress(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+
+        if (glfwGetMouseButton(app->window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS) {
+            double xpos, ypos;
+            glfwGetCursorPos(app->window, &xpos, &ypos);
+
+            int width, height;
+            glfwGetWindowSize(app->window, &width, &height);
+
+            float nx = xpos / width;
+            float ny = 1.0f - (ypos / height);
+
+            float worldX = (app->cam.aabbMin.x + nx * (app->cam.aabbMax.x - app->cam.aabbMin.x)) + app->cam.cameraPos.x;
+            float worldY = (app->cam.aabbMin.y + ny * (app->cam.aabbMax.y - app->cam.aabbMin.y)) + app->cam.cameraPos.y;
+
+            lua_pushnumber(L, worldX);
+            lua_pushnumber(L, worldY);
+
+            return 2;
+        }
+
+        return 0;
+    }
+
     static int lua_AABB2D_intersectsAll(lua_State *L) {
         auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
         auto obj = pop_shared_ptr_from_lua<gameObject>(L, 2);
@@ -1967,6 +2024,20 @@ public:
         lua_pushboolean(L, AABB2d::intersectsAll(obj, app->gameObjects));
 
         return 1;
+    }
+
+    static int lua_AABB2D_intersectsFirst(lua_State *L) {
+        auto* app = pop_raw_ptr_from_lua<blahajEngine::engine>(L, 1);
+        auto obj = pop_shared_ptr_from_lua<gameObject>(L, 2);
+
+        std::shared_ptr<gameObject> objB = AABB2d::intersectsFirst(obj, app->gameObjects);
+
+        if (objB != nullptr) {
+            push_shared_ptr_to_lua(L, objB);
+            return 1;
+        }
+
+        return 0;
     }
 
     static int lua_setProgramName(lua_State *L) {
@@ -1995,7 +2066,10 @@ public:
         lua_register(L, "moveGameObject", lua_moveGameObject);
         lua_register(L, "camLookAtGameObject", lua_camLookAtGameObject);
         lua_register(L, "getKeyPressed", lua_getKeyPressed);
+        lua_register(L, "getLeftMousePress", lua_getLeftMousePress);
+        lua_register(L, "getRightMousePress", lua_getRightMousePress);
         lua_register(L, "AABB2D_intersectsAll", lua_AABB2D_intersectsAll);
+        lua_register(L, "AABB2D_intersectsFirst", lua_AABB2D_intersectsFirst);
         lua_register(L, "setProgramName", lua_setProgramName);
         lua_register(L, "setTargetFPS", lua_setTargetFPS);
     }

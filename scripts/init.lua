@@ -9,10 +9,12 @@ function Init()
     addTexture(engine, 1, "assets/null.png")
     addTexture(engine, 2, "assets/debug.png")
     addTexture(engine, 3, "assets/debug_alt.png")
+    addTexture(engine, 4, "assets/death.png")
+    addTexture(engine, 5, "assets/life.png")
 
     -- addGameObject(engine, posX, posY, posZ, rotX, rotY, rotZ, scale, pipelineID, textureID, scriptPath)
     addGameObject(engine, 0, 0.6, 0, 0, 0, 0, 0.5, 1, 1, nil)
-    addGameObject(engine, 0, -0.3, 0, 0, 0, 0, 0.1, 1, 2, "scripts/testObject.lua")
+    addGameObject(engine, 0, -0.3, 0, 0, 0, 0, 0.1, 1, 2, nil)
     addGameObject(engine, 0.3, 0, 0, 0, 0, 0, 0.1, 1, 3, nil)
     addGameObject(engine, -0.3, 0, 0, 0, 0, 0, 0.1, 1, 3, nil)
 

@@ -31,6 +31,20 @@ function Update()
     local velocityX = 0
     local velocityY = 0
 
+    local x, y = getLeftMousePress(engine)
+    if x and y ~= nil then
+        addGameObject(engine, x, y, -1, 0, 0, 0, 0.1, 1, 5, nil)
+        x = nil
+        y = nil
+    end
+
+    local x, y = getRightMousePress(engine)
+    if x and y ~= nil then
+        addGameObject(engine, x, y, -1, 0, 0, 0, 0.1, 1, 4, "scripts/testObject.lua")
+        x = nil
+        y = nil
+    end
+
     if getKeyPressed(engine, "W") then
         velocityY = velocityY + 1
     end
@@ -45,7 +59,7 @@ function Update()
     end
 
     if getKeyPressed(engine, "K") and OBJMade == nil then
-        OBJ = addGameObject(engine, 1, 1, 0, 0, 0, 0, 0.1, 1, 1, "scripts/testObject.lua")
+        OBJ = addGameObject(engine, 1, 1, 0, 0, 0, 0, 0.1, 1, 1, nil)
         OBJMade = true
     end
     if getKeyPressed(engine, "L") and OBJ ~= nil then

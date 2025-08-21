@@ -122,5 +122,18 @@ namespace blahajEngine {
             }
             return false;
         }
+
+        static std::shared_ptr<gameObject> intersectsFirst(std::shared_ptr<gameObject> objectA, std::vector<std::shared_ptr<gameObject>>& objects) {
+            for (auto& objectB : objects) {
+                if (objectA == objectB) {
+                    continue;
+                }
+
+                if (intersects(objectA, objectB)) {
+                    return objectB;
+                }
+            }
+            return nullptr;
+        }
     };
 }
