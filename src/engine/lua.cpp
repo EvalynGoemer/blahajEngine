@@ -133,7 +133,6 @@ static int lua_addGameObject(lua_State *L) {
 
     if (it != gameObjectsStaging.end()) {
         auto foundObject = *it;
-        // TODO Mayber change to app->L using getter just incase it breaks
         push_shared_ptr_to_lua(L, foundObject);
     } else {
         throw std::runtime_error(
