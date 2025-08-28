@@ -62,11 +62,15 @@ namespace blahajEngine {
         alignas(16) glm::mat4 model;
         alignas(16) glm::mat4 view;
         alignas(16) glm::mat4 proj;
-        // alignas(16) glm::vec4 timeAndResolution;
     };
 
     struct ssboStruct{
         UniformBufferObject UBOs[200000];
+    };
+
+    struct pushConstantLayout {
+        int id;
+        int texture_id;
     };
 
     enum objectTypes {
@@ -87,8 +91,6 @@ namespace blahajEngine {
     struct gameObject {
         int id;
         int texture_id;
-
-        // std::chrono::high_resolution_clock::time_point time;
 
         glm::vec3 pos;
         glm::vec3 rot;
@@ -120,8 +122,6 @@ namespace blahajEngine {
         }
 
         gameObject(int id, glm::vec3 pos, glm::vec3 rot, glm::vec3 scale, int model_id) {
-            // time = std::chrono::high_resolution_clock::now();
-
             this->id = id;
             this->pos = pos;
             this->rot = rot;

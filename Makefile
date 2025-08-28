@@ -4,7 +4,7 @@ UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
     # Linux settings
     CXX = g++
-    CFLAGS = -std=c++17 -O2 -Wall
+    CFLAGS = -std=c++17 -O2 -Wall -DNDEBUG
     LDFLAGS = -lglfw -lvulkan -ldl -lpthread -lX11 -lXxf86vm -lXrandr -lXi -llua -lm
     INCLUDES =
     LIBPATHS =
@@ -12,7 +12,7 @@ else ifneq (,$(findstring MINGW64,$(UNAME_S)))
     # Windows MSYS2 MinGW64 settings
     MINGW64 = /mingw64
     CXX = $(MINGW64)/bin/g++
-    CFLAGS = -std=c++17 -O2 -Wall -I$(MINGW64)/include
+    CFLAGS = -std=c++17 -O2 -Wall -I$(MINGW64)/include -DNDEBUG
     LDFLAGS = -L$(MINGW64)/lib -lglfw3 -lvulkan-1 -llua -lm
     INCLUDES = -I$(MINGW64)/include
     LIBPATHS = -L$(MINGW64)/lib
@@ -26,9 +26,9 @@ OBJ_DIR = obj
 SHADER_DIR = shaders
 SPV_DIR = spv
 
-# Sources and objects
-SOURCES := $(wildcard $(SRC_DIR)/*.cpp)
-OBJECTS := $(SOURCES:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
+# Sources and objects (recursive)
+SOURCES := $(shell find $(SRC_DIR) -name '*.cpp')
+OBJECTS := $(patsubst $(SRC_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(SOURCES))
 
 # Shaders and compiled shaders
 SHADERS := $(wildcard $(SHADER_DIR)/*.vert $(SHADER_DIR)/*.frag $(SHADER_DIR)/*.comp)
@@ -42,7 +42,7 @@ $(TARGET): $(OBJECTS)
 	$(CXX) $(OBJECTS) -o $@ $(LIBPATHS) $(LDFLAGS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-	@mkdir -p $(OBJ_DIR)
+	@mkdir -p $(dir $@)
 	$(CXX) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 $(SPV_DIR)/%.spv: $(SHADER_DIR)/%

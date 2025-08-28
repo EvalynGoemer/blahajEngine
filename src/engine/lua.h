@@ -1,9 +1,15 @@
-#include <lua.hpp>
+#pragma once
 
+#include <lua.hpp>
 #include <memory>
 #include <string>
 
 namespace blahajEngine {
+    class lua {
+    public:
+        static void bindAllEngineFuncs(lua_State *L);
+    };
+
     template<typename T>
     void push_shared_ptr_to_lua(lua_State* L, const std::shared_ptr<T>& ptr) {
         void* ptr_mem = lua_newuserdata(L, sizeof(std::shared_ptr<T>));
